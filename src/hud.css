@@ -93,6 +93,16 @@
 .hud-menu .dot.on {
   display: block;
 }
+/* Menu / Boosts fold buttons: only used on portrait phones (see the portrait block). */
+.hud-toggle {
+  display: none;
+}
+.hud-offers {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: calc(0.4 * var(--u));
+}
 .hud-stat {
   display: flex;
   align-items: center;
@@ -734,41 +744,199 @@
   box-shadow: 0 0.25em 0 #6a3a00;
   font-size: calc(1.9 * var(--u));
 }
-/* Portrait phones: everything stacks under the platform's reserved toolbar + chat:
-   boss timer, then the level panel, then the menu (left) and boosts (right). */
+/* Portrait phones: a slim strip under the platform's reserved toolbar + chat (boss timer,
+   then a thin level bar), then one Menu button + the Wins / Rebirths counters on the left
+   and one Boosts button on the right. The menu grid and the boost offers open as small
+   pop-outs from those buttons, so the play view and the controls stay clear. */
 @media (orientation: portrait) {
   .touch-ui .hud-top {
     top: var(--hud-top);
-    font-size: calc(1.45 * var(--u));
+    font-size: calc(1.15 * var(--u));
   }
   .touch-ui .hud-bossbar {
     top: var(--hud-top);
+    width: min(72vw, calc(26 * var(--u)));
+  }
+  .touch-ui .hud-bossbar .name {
+    font-size: calc(1.1 * var(--u));
+  }
+  .touch-ui .hud-bossbar .track {
+    height: calc(1.8 * var(--u));
+    border-width: 0.15em;
+  }
+  .touch-ui .hud-bossbar .txt {
+    font-size: calc(1.1 * var(--u));
+    line-height: calc(1.55 * var(--u));
   }
   .touch-ui .hud-bottom {
     bottom: auto;
-    top: calc(var(--hud-top) + 3.4 * var(--u));
-    width: min(94vw, calc(34 * var(--u)));
-  }
-  .touch-ui .hud-left,
-  .touch-ui .hud-right {
-    top: calc(var(--hud-top) + 12 * var(--u));
+    top: calc(var(--hud-top) + 2 * var(--u));
+    width: min(72vw, calc(26 * var(--u)));
+    gap: calc(0.1 * var(--u));
   }
   .touch-ui .hud-info {
-    font-size: calc(1.25 * var(--u));
+    font-size: calc(0.95 * var(--u));
+    padding: 0 calc(0.5 * var(--u));
   }
   .touch-ui .hud-level {
-    height: calc(3 * var(--u));
+    height: calc(2.1 * var(--u));
+    border-width: 0.15em;
+    border-radius: calc(0.6 * var(--u));
   }
   .touch-ui .hud-level .lv,
   .touch-ui .hud-level .xp {
-    font-size: calc(1.6 * var(--u));
+    font-size: calc(1.2 * var(--u));
   }
-  .touch-ui .hud-prompt {
-    bottom: calc(var(--safe-b) + clamp(150px, 38vmin, 210px));
+  .touch-ui .hud-level .lv {
+    left: calc(0.6 * var(--u));
+  }
+  .touch-ui .hud-level .xp {
+    right: calc(0.6 * var(--u));
+  }
+  .touch-ui .hud-left,
+  .touch-ui .hud-right {
+    top: calc(var(--hud-top) + 6.4 * var(--u));
+    gap: calc(0.4 * var(--u));
+  }
+
+  /* The two fold buttons (>= 44px tap targets). */
+  .touch-ui .hud-toggle {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: max(44px, calc(4.8 * var(--u)));
+    padding: 0;
+    border: 0;
+    background: none;
+    font-size: calc(0.95 * var(--u));
+  }
+  .touch-ui .hud-toggle svg {
+    width: max(38px, calc(3.8 * var(--u)));
+    height: max(38px, calc(3.8 * var(--u)));
+    filter: drop-shadow(0 0.2em 0.15em rgba(0, 0, 0, 0.35));
+  }
+  .touch-ui .hud-toggle span {
+    margin-top: calc(-0.3 * var(--u));
+  }
+  .touch-ui .hud-left.open .hud-toggle svg,
+  .touch-ui .hud-right.open .hud-toggle svg {
+    transform: scale(0.9);
+    filter: drop-shadow(0 0 0.5em rgba(255, 230, 90, 0.9));
+  }
+  .touch-ui .menu-toggle .dot {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: calc(1 * var(--u));
+    height: calc(1 * var(--u));
+    border-radius: 50%;
+    background: #ff2d4a;
+    border: 0.18em solid #fff;
+    display: none;
+    animation: hud-bob 1s ease-in-out infinite;
+  }
+  .touch-ui .menu-toggle .dot.on {
+    display: block;
+  }
+  .touch-ui .hud-left.open .menu-toggle .dot {
+    display: none;
+  }
+
+  /* Left: menu grid folded away; opens as a pop-out to the right of its button. */
+  .touch-ui .hud-left {
+    align-items: flex-start;
+  }
+  .touch-ui .hud-left .hud-menu {
+    display: none;
+    position: absolute;
+    top: 0;
+    left: calc(max(44px, 4.8 * var(--u)) + 0.5 * var(--u));
+    grid-template-columns: repeat(3, auto);
+    gap: calc(0.3 * var(--u)) calc(0.4 * var(--u));
+    padding: calc(0.5 * var(--u)) calc(0.6 * var(--u));
+    border-radius: calc(1 * var(--u));
+    background: rgba(20, 28, 60, 0.82);
+    border: 0.15em solid rgba(255, 255, 255, 0.55);
+    box-shadow: 0 0.3em 0 rgba(0, 0, 0, 0.3);
+    z-index: 2;
+  }
+  .touch-ui .hud-left.open .hud-menu {
+    display: grid;
+    animation: hud-pop-plain 0.18s ease-out;
+  }
+  .touch-ui .hud-menu button {
+    width: max(48px, calc(5 * var(--u)));
+    font-size: calc(0.95 * var(--u));
+  }
+  .touch-ui .hud-menu button svg {
+    width: max(38px, calc(3.8 * var(--u)));
+    height: max(38px, calc(3.8 * var(--u)));
+  }
+  .touch-ui .hud-menu button span {
+    margin-top: calc(-0.3 * var(--u));
+  }
+  .touch-ui .hud-menu .dot {
+    width: calc(0.9 * var(--u));
+    height: calc(0.9 * var(--u));
+  }
+  .touch-ui .hud-stat {
+    min-width: 0;
+    font-size: calc(1.35 * var(--u));
+    padding: calc(0.2 * var(--u)) calc(0.8 * var(--u)) calc(0.2 * var(--u)) calc(0.3 * var(--u));
+    gap: calc(0.3 * var(--u));
+    border-radius: calc(0.6 * var(--u));
+  }
+  .touch-ui .hud-stat svg {
+    width: calc(1.9 * var(--u));
+    height: calc(1.9 * var(--u));
+  }
+
+  /* Right: boost offers folded away; open as a pop-out to the left of their button. */
+  .touch-ui .hud-right .hud-offers {
+    display: none;
+    position: absolute;
+    top: 0;
+    right: calc(max(44px, 4.8 * var(--u)) + 0.5 * var(--u));
+    gap: calc(0.3 * var(--u));
+    padding: calc(0.5 * var(--u)) calc(0.6 * var(--u)) calc(0.5 * var(--u)) calc(1.6 * var(--u));
+    border-radius: calc(1 * var(--u));
+    background: rgba(20, 28, 60, 0.82);
+    border: 0.15em solid rgba(255, 255, 255, 0.55);
+    box-shadow: 0 0.3em 0 rgba(0, 0, 0, 0.3);
+    z-index: 2;
+  }
+  .touch-ui .hud-right.open .hud-offers {
+    display: flex;
+    animation: hud-pop-plain 0.18s ease-out;
+  }
+  .touch-ui .boost .banner {
+    width: calc(10 * var(--u));
+    height: calc(3 * var(--u));
+    font-size: calc(1.35 * var(--u));
+    border-width: 0.14em;
+  }
+  .touch-ui .boost .icon {
+    width: calc(3.4 * var(--u));
+    height: calc(3.4 * var(--u));
+    left: calc(-1.2 * var(--u));
+  }
+  .touch-ui .boost .price {
+    font-size: calc(1.05 * var(--u));
+    margin-right: calc(0.6 * var(--u));
+  }
+  .touch-ui .starter {
+    margin: calc(0.2 * var(--u)) auto 0;
+    align-self: center;
+    font-size: calc(1 * var(--u));
   }
   .touch-ui .starter > svg {
-    width: calc(4.6 * var(--u));
-    height: calc(4.6 * var(--u));
+    width: calc(3.4 * var(--u));
+    height: calc(3.4 * var(--u));
+  }
+
+  .touch-ui .hud-prompt {
+    bottom: calc(var(--safe-b) + clamp(150px, 38vmin, 210px));
   }
   .touch-ui .hud-announce {
     top: 46%;

@@ -31,6 +31,7 @@ export const ICONS = {
   potion: `<svg viewBox="0 0 64 64"><path d="M25 6h14v14l12 18a14 14 0 0 1-12 21H25a14 14 0 0 1-12-21l12-18z" fill="#bfefff" stroke="#13163a" stroke-width="3"/><path d="M15 40h34a12 12 0 0 1-10 17H25a12 12 0 0 1-10-17z" fill="#3a8aff"/><path d="M35 34 26 47h7l-3 9 10-13h-7z" fill="#ffd21a" stroke="#5a3200" stroke-width="2"/><rect x="22" y="3" width="20" height="6" rx="2" fill="#c9783a" stroke="#13163a" stroke-width="3"/></svg>`,
   soundOn: `<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h4l5-4v14l-5-4H4z" fill="#fff"/><path d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12"/></svg>`,
   soundOff: `<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h4l5-4v14l-5-4H4z" fill="#fff"/><path d="M16 9l5 6M21 9l-5 6"/></svg>`,
+  menu: `<svg viewBox="0 0 64 64"><rect x="6" y="6" width="52" height="52" rx="14" fill="#3a8aff" stroke="#13163a" stroke-width="3"/><rect x="15" y="15" width="14" height="14" rx="4" fill="#fff" stroke="#13163a" stroke-width="2.5"/><rect x="35" y="15" width="14" height="14" rx="4" fill="#ffc21a" stroke="#13163a" stroke-width="2.5"/><rect x="15" y="35" width="14" height="14" rx="4" fill="#ff5a6a" stroke="#13163a" stroke-width="2.5"/><rect x="35" y="35" width="14" height="14" rx="4" fill="#7dff6a" stroke="#13163a" stroke-width="2.5"/></svg>`,
   tentacle: `<svg viewBox="0 0 64 64"><path d="M20 58c-6-14 2-26 14-30 10-3 12-12 6-16-5-3-11 1-9 6" fill="none" stroke="#13163a" stroke-width="14" stroke-linecap="round"/><path d="M20 58c-6-14 2-26 14-30 10-3 12-12 6-16-5-3-11 1-9 6" fill="none" stroke="#ff6a8a" stroke-width="9" stroke-linecap="round"/><circle cx="24" cy="45" r="2.6" fill="#ffd0dc"/><circle cx="30" cy="35" r="2.4" fill="#ffd0dc"/><circle cx="40" cy="27" r="2.2" fill="#ffd0dc"/></svg>`,
 }
 const trophy = (cls = '') => `<span class="${cls}">${ICONS.trophy}</span>`
@@ -67,7 +68,14 @@ export function createHud(actions) {
   menu.append(rbBtn, shopBtn, invBtn)
   const winsStat = el('div', 'hud-stat wins', `${ICONS.trophy}<span class="ol">0</span>`)
   const rbStat = el('div', 'hud-stat rebirths', `${ICONS.rebirth}<span class="ol">0</span>`)
-  left.append(menu, winsStat, rbStat)
+  // Portrait phones fold the menu and the boost offers behind one button each (CSS shows the
+  // toggles only there); opening one closes the other, and picking an entry folds it again.
+  const menuToggle = btn('hud-toggle menu-toggle', `${ICONS.menu}<span class="ol">Menu</span><i class="dot"></i>`, () => {
+    right.classList.remove('open')
+    left.classList.toggle('open')
+  })
+  left.append(menuToggle, menu, winsStat, rbStat)
+  menu.addEventListener('click', () => left.classList.remove('open'), true)
 
   // Top.
   const top = el('div', 'hud-top')
@@ -80,7 +88,14 @@ export function createHud(actions) {
   const trainBtn = btn('boost train', `<div class="banner"><span class="icon">${ICONS.bolt}</span><span class="ol">x2 Train</span></div><div class="price ol"></div>`, actions.train2x)
   const winsBtn = btn('boost wins2', `<div class="banner"><span class="icon">${ICONS.trophy}</span><span class="ol">x2 Wins</span></div><div class="price ol"></div>`, actions.wins2x)
   const starterBtn = btn('starter', `${ICONS.gift}<span class="ol">STARTER PACK!</span><span class="price ol"></span>`, actions.starter)
-  right.append(trainBtn, winsBtn, starterBtn)
+  const boostToggle = btn('hud-toggle boost-toggle', `${ICONS.bolt}<span class="ol">Boosts</span>`, () => {
+    left.classList.remove('open')
+    right.classList.toggle('open')
+  })
+  const offers = el('div', 'hud-offers')
+  offers.append(trainBtn, winsBtn, starterBtn)
+  offers.addEventListener('click', () => right.classList.remove('open'), true)
+  right.append(boostToggle, offers)
 
   // Bottom.
   const bottom = el('div', 'hud-bottom')
@@ -124,6 +139,12 @@ export function createHud(actions) {
   const revive = el('div', 'hud-revive')
 
   root.append(hurt, left, top, bossBar, right, bottom, prompt, combat, hitBtn, potion, mute, announce, toasts, revive)
+
+  // A tap anywhere else (world, joystick) folds an open pop-out away.
+  document.addEventListener('pointerdown', (e) => {
+    if (!left.contains(e.target)) left.classList.remove('open')
+    if (!right.contains(e.target)) right.classList.remove('open')
+  })
 
   // --- Rendering from state -------------------------------------------------------------------
   let shownWins = state.wins
@@ -366,6 +387,12 @@ export function createHud(actions) {
       if (timer.dataset.t !== tt) {
         timer.dataset.t = tt
         timer.innerHTML = tt
+      }
+      // The folded menu shows a "!" dot when any entry inside has one.
+      const menuDot = !!menu.querySelector('.dot.on')
+      if (menuToggle.dataset.dot !== String(menuDot)) {
+        menuToggle.dataset.dot = String(menuDot)
+        menuToggle.querySelector('.dot').classList.toggle('on', menuDot)
       }
       const on = state.train2x > 0
       potion.classList.toggle('on', on)
