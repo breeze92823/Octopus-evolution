@@ -1,5 +1,5 @@
 import { ACESFilmicToneMapping, Clock, PCFSoftShadowMap, PerspectiveCamera, Scene, SRGBColorSpace, Vector3, WebGLRenderer } from 'three'
-import { CAMERA, HUB, SPAWN, SPAWN_FACING, STAGES, TENTACLES, graphicsPreset, RENDER } from './config.js'
+import { CAMERA, EMOTES, HUB, PLAYER_DIMS, SPAWN, SPAWN_FACING, STAGES, TENTACLES, graphicsPreset, RENDER } from './config.js'
 import * as bloxity from './bloxity.js'
 import { install as installInput, isLocked, onKey } from './input.js'
 import { installTouch } from './touch.js'
@@ -13,8 +13,11 @@ import { buildHub } from './hub.js'
 import { buildLane } from './lane.js'
 import { createPostFx } from './postfx.js'
 import { setNeonBloom } from './propkit.js'
-import { buildDefaultCharacter, loadBaseCharacter } from './avatar/character.js'
-import { applyProportions, attachEquippedAccessories } from './avatar/loader.js'
+import { buildDefaultCharacter } from './avatar/character.js'
+import { applyProportions } from './avatar/loader.js'
+import { EmotePlayer } from './avatar/emote.js'
+import { buildLookCharacter, disposeLook, localLook } from './avatar/look.js'
+import { createRemotePlayers, disposeSprite, textSprite } from './remotePlayers.js'
 import { disposeAnimator, makeAnimator } from './avatar/animator.js'
 import { createOctopus, createTentacleDisplay } from './octopus.js'
 import { createFx } from './fx.js'
@@ -23,7 +26,9 @@ import { createHud } from './hud.js'
 import { closeTopWindow, anyWindowOpen, createWindows, setWindowReserved } from './windows.js'
 import { createTraining } from './training.js'
 import { createCombat } from './combat.js'
-import { installAudio, isMuted, sfx, toggleMuted, updateAudio } from './audio/index.js'
+import { createProgression } from './progression.js'
+import { initNet, net, onLeaderboard, saveNow, sendEmote, sendPose } from './net.js'
+import { installAudio, isMuted, setMuted, setVolume, sfx, toggleMuted, updateAudio } from './audio/index.js'
 import {
   addWins,
   armsFor,
@@ -43,7 +48,6 @@ import {
   onChange,
   owns,
   resetProgress,
-  skipBossPrice,
   spendWins,
   state,
   zoneUnlocked,
@@ -59,6 +63,7 @@ const later = (s, fn) => timers.push({ at: performance.now() + s * 1000, fn })
 
 function applySetting(key, value) {
   if (key === 'camera_sensitivity') setCameraSensitivity(value)
+  else if (key === 'master_volume') setVolume(Number(value) / 100)
   else if (key === 'fullscreen') bloxity.requestFullscreen(value)
   else if (key === 'graphics_quality' && renderer) {
     const next = graphicsPreset(value)
@@ -130,23 +135,24 @@ let avatar = null
 let animator = null
 let generation = 0
 let avatarReady = false
+let emote = null
 function setAvatar(next) {
-  if (avatar) avatar.removeFromParent()
+  if (avatar) {
+    avatar.removeFromParent()
+    disposeLook(avatar)
+  }
   disposeAnimator(animator)
   avatar = next
   octo.seat.add(avatar)
+  emote = new EmotePlayer(avatar) // before the animator touches a bone: the bind pose is read here
   animator = makeAnimator(avatar)
 }
 setAvatar(buildDefaultCharacter())
 async function loadAvatar() {
   const mine = ++generation
   try {
-    const group = await loadBaseCharacter()
-    if (mine !== generation) return
-    const equipped = bloxity.authState.user ? bloxity.getEquippedAvatar() : null
-    await attachEquippedAccessories(group, equipped, { skinTextureUrl: bloxity.getSkinTextureUrl() })
-    if (mine !== generation) return
-    applyProportions(group, bloxity.authState.user ? bloxity.getProportions() : null)
+    const group = await buildLookCharacter(localLook(), { local: true })
+    if (mine !== generation) return disposeLook(group)
     setAvatar(group)
   } finally {
     if (mine === generation) avatarReady = true
@@ -163,6 +169,51 @@ bloxity.subscribeAuth((s) => {
 })
 bloxity.onAvatarChanged(loadAvatar)
 bloxity.onProportionsChanged(() => applyProportions(avatar, bloxity.getProportions()))
+
+// The other players in the room (their octopus, tentacle skin, level and Bloxity look come from the server's roster).
+const remote = createRemotePlayers({ scene, getRoom: () => net.room, localPos: () => player.renderPosition })
+
+// Emotes: Boxity draws the picker; the game plays the clip here and relays the id so the others see it too.
+function stopEmote() {
+  if (emote?.active) {
+    emote.stop()
+    sendEmote('')
+  }
+}
+bloxity.onEmote(async (id) => {
+  if (!id) return stopEmote()
+  const e = (await bloxity.loadEmotes()).get(id)
+  if (e && emote?.play(e)) sendEmote(id) // an unknown id is ignored quietly
+})
+
+// Chat bubbles: Boxity owns chat; its messages reach everyone in the room, the game draws them over the sender.
+let myBubble = null
+let myBubbleAt = 0
+bloxity.onChatMessage((m) => {
+  if (!m.isLocalPlayer) return remote.say(m.userId, m.bubble)
+  disposeSprite(myBubble)
+  myBubble = textSprite(m.bubble, { bubble: true })
+  myBubbleAt = performance.now()
+  octo.group.add(myBubble)
+})
+
+// Ads: Boxity runs every ad (a midroll can start at any time). The game pauses and mutes in between.
+let paused = false
+let mutedBeforeAd = false
+bloxity.onAdBreak((on) => {
+  paused = on
+  if (on) {
+    mutedBeforeAd = isMuted()
+    setMuted(true)
+  } else setMuted(mutedBeforeAd)
+})
+let adWindowed = false
+bloxity.adScreen('gameplay')
+
+// The portal's pause menu "Reset Character".
+bloxity.onRespawnRequest(() => {
+  if (!combat.isDead()) combat.inLane() ? combat.leave() : teleportHome()
+})
 
 // Shop pedestals: a live mini octopus in each skin.
 const displays = hub.shopPads.map((pad) => {
@@ -184,6 +235,7 @@ function teleportHome() {
 
 let combat = null
 let training = null
+let prog = null // rewards, collection, rebirth/ascend popups, trail + title (progression.js)
 let currentPrompt = null
 const windows = createWindows({
   onBuyTentacle: (def) => celebrateTentacle(def),
@@ -198,9 +250,9 @@ function buyOrDeny(ok, what) {
   return ok
 }
 const hud = createHud({
-  rebirth: () => windows.rebirth.toggle(),
+  rebirth: () => prog.popups.rebirth.toggle(),
   shop: () => windows.shop.toggle('tentacles'),
-  inventory: () => windows.inventory.toggle(),
+  inventory: () => prog.collection.toggle(),
   buyLevels: (pack) => {
     if (atCap()) return buyOrDeny(false, 'Max level! Rebirth to go higher.')
     buyOrDeny(buyLevels(pack))
@@ -218,12 +270,6 @@ const hud = createHud({
       celebrateTentacle(equippedTentacle())
     }
   },
-  skipBoss: () => {
-    if (combat.hubBossActive()) return
-    if (!spendWins(skipBossPrice())) return buyOrDeny(false)
-    sfx.purchase()
-    combat.skipBossTimer()
-  },
   leave: () => combat.leave(),
   throw: () => combat.throwAction(),
   prompt: () => currentPrompt?.action?.(),
@@ -237,6 +283,7 @@ const hud = createHud({
 
 training = createTraining({ hub, octo, fx, player })
 combat = createCombat({ scene, octo, fx, bars, lane, hud, player, teleportHome })
+prog = createProgression({ scene, camera, hud, octo, fx, player, onTentacle: (def) => celebrateTentacle(def), onRebirth: (kept) => celebrateRebirth(kept) })
 
 // Platform toolbar + chat live in the top-left: keep the HUD below them.
 bloxity.onReservedAreas((areas) => {
@@ -267,23 +314,33 @@ function refreshZones() {
     else z.setLock({ locked: true, text: `${d.rebirths} Rebirth${d.rebirths > 1 ? 's' : ''}` })
   }
 }
+// The four hub boards: the server's top 10 (net.js, by the backend's LEADERBOARD_STATS) with each
+// board's value formatted; offline, or before the first list arrives, just the local player.
+// (Called from the auth subscription above, before the rest of this file runs: keep it self-contained.)
 function refreshBoards() {
-  const name = bloxity.displayName()
-  const row = (value) => {
-    const rows = [{ rank: 1, name, value }]
-    for (let i = 2; i <= 10; i++) rows.push({ rank: i, name: '---', value: '' })
-    return rows
+  const playtime = (s) => {
+    const h = Math.floor(s / 3600)
+    const m = Math.floor((s % 3600) / 60)
+    return h ? `${h}h ${m}m` : `${m}m`
   }
-  hub.boards.wins.setRows(row(fmt(state.totalWins)))
-  hub.boards.rebirths.setRows(row(fmt(state.rebirths)))
-  const h = Math.floor(state.playtime / 3600)
-  const m = Math.floor((state.playtime % 3600) / 60)
-  hub.boards.playtime.setRows(row(h ? `${h}h ${m}m` : `${m}m`))
-  hub.boards.stage.setRows(row(state.bestStage ? `Stage ${state.bestStage}` : '-'))
+  const boards = {
+    wins: { stat: 'totalWins', local: state.totalWins, show: fmt },
+    rebirths: { stat: 'rebirths', local: state.rebirths, show: fmt },
+    playtime: { stat: 'playtime', local: state.playtime, show: playtime },
+    stage: { stat: 'bestStage', local: state.bestStage, show: (v) => (v ? `Stage ${v}` : '-') },
+  }
+  for (const [key, b] of Object.entries(boards)) {
+    const rows = (net.leaderboard[b.stat] ?? []).slice(0, 10).map((r, i) => ({ rank: i + 1, name: r.name, value: b.show(r.value) }))
+    if (!rows.length) rows.push({ rank: 1, name: bloxity.displayName(), value: b.show(b.local) })
+    while (rows.length < 10) rows.push({ rank: rows.length + 1, name: '---', value: '' })
+    hub.boards[key].setRows(rows)
+  }
 }
 refreshPads()
 refreshZones()
 refreshBoards()
+onLeaderboard(refreshBoards)
+initNet() // after the hub exists: the server's save hydrates the state and the world reacts
 
 const tmp = new Vector3()
 function celebrateTentacle(def) {
@@ -293,10 +350,10 @@ function celebrateTentacle(def) {
   fx.motes(tmp.set(player.renderPosition.x, 0.6, player.renderPosition.z), { count: 30, colors: [def.colors.base, def.colors.accent, '#ffffff'], radius: 2.4, height: 1.5 })
   hud.announce(def.name.toUpperCase(), `+${fmt(def.xp)} XP per hit`, 'win')
 }
-function celebrateRebirth() {
+function celebrateRebirth(keptLevels = false) {
   sfx.rebirth()
   octo.pulse()
-  hud.announce('REBIRTH!', `Level cap ${levelCap()} · XP boost up!`, 'lvl')
+  hud.announce('REBIRTH!', keptLevels ? `Levels kept! Cap ${levelCap()} · XP boost up!` : `Level cap ${levelCap()} · XP boost up!`, 'lvl')
   fx.motes(tmp.set(player.renderPosition.x, 0.4, player.renderPosition.z), { count: 60, colors: ['#ff5fa8', '#ffffff', '#ffe066', '#8fe0ff'], radius: 3.5, height: 3, rise: 1.4 })
   fx.ring(tmp.set(player.renderPosition.x, 0, player.renderPosition.z), { radius: 14, color: '#ff9ad0', life: 0.8 })
   fx.shake(0.4)
@@ -387,7 +444,7 @@ function findPrompt() {
         }
       return { title: `${d.name} is locked`, sub: `Needs ${d.rebirths} Rebirth${d.rebirths > 1 ? 's' : ''} (you have ${state.rebirths})`, tone: 'locked', noKey: true }
     }
-    if (atCap()) return { title: 'MAX LEVEL!', sub: 'Rebirth to keep growing', tone: 'locked', action: () => windows.rebirth.open() }
+    if (atCap()) return { title: 'MAX LEVEL!', sub: 'Rebirth to keep growing', tone: 'locked', action: () => prog.popups.rebirth.open() }
   }
   const portal = hub.portal
   if (Math.hypot(p.x - portal.x, p.z - portal.z) < portal.radius + 2.5) {
@@ -421,7 +478,7 @@ onKey('KeyR', () => {
   else teleportHome()
 })
 onKey('KeyB', () => windows.shop.toggle('tentacles'))
-onKey('KeyI', () => windows.inventory.toggle())
+onKey('KeyI', () => prog.collection.toggle())
 installTouch({
   mode: toggleMode,
   day: () => lighting.toggleDayNight(),
@@ -448,6 +505,10 @@ let elapsed = 0
 
 function frame(forcedDt, draw = true) {
   const dt = forcedDt ?? Math.min(clock.getDelta(), 0.1)
+  if (paused && forcedDt === undefined) {
+    if (draw) postfx.render() // an ad break covers the game: nothing advances meanwhile
+    return
+  }
   elapsed += dt
 
   stepPhysics(dt)
@@ -482,9 +543,22 @@ function frame(forcedDt, draw = true) {
   octo.group.updateMatrixWorld()
   octo.update(dt, { speed, grounded: player.grounded, time: elapsed })
   animator?.update(dt, { grounded: true, speed: 0, verticalVelocity: 0, turn: 0 })
+  if (emote?.active) {
+    if (speed > EMOTES.stopSpeed) stopEmote() // walking ends an emote
+    emote.update(dt)
+  }
+  sendPose(p.x, p.y, p.z, player.facing, speed)
+  remote.update(dt, elapsed)
+  if (myBubble) {
+    if (performance.now() - myBubbleAt > bloxity.bubbleSeconds() * 1000) {
+      disposeSprite(myBubble)
+      myBubble = null
+    } else myBubble.position.set(0, octo.seat.position.y + PLAYER_DIMS.height + 1.4, 0)
+  }
 
   training.update(dt)
   combat.update(dt)
+  prog.update(dt)
   for (const { pad, d } of displays) {
     const dx = pad.center.x - p.x
     const dz = pad.center.z - p.z
@@ -496,7 +570,12 @@ function frame(forcedDt, draw = true) {
   // HUD state.
   const inLane = combat.inLane()
   hud.setLane(inLane)
-  hud.setWindowed(anyWindowOpen())
+  const windowed = anyWindowOpen()
+  hud.setWindowed(windowed)
+  if (windowed !== adWindowed) {
+    adWindowed = windowed
+    bloxity.adScreen(windowed ? 'panel' : 'gameplay') // Boxity's banners follow the screen that is showing
+  }
   currentPrompt = combat.inCombat() ? null : findPrompt()
   hud.prompt(currentPrompt)
   hud.setTraining(!!training.activeZone() && !combat.inCombat())
@@ -536,7 +615,10 @@ function frame(forcedDt, draw = true) {
 }
 renderer.setAnimationLoop(() => frame())
 
-window.addEventListener('beforeunload', bloxity.teardown)
+window.addEventListener('beforeunload', () => {
+  saveNow()
+  bloxity.teardown()
+})
 
 // Dev-only console hook, e.g. __game.teleport(0, 0, -60) or __game.give(1000)
 if (import.meta.env.DEV) {
@@ -555,6 +637,8 @@ if (import.meta.env.DEV) {
     hub,
     lane,
     octo,
+    remote,
+    hud,
     bodies: bodyCount,
     toggleMode,
     teleport,

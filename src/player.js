@@ -17,6 +17,7 @@ export const player = {
   grounded: true,
   facing: SPAWN_FACING, // yaw the character model faces, radians
   dims: { ...PLAYER_DIMS },
+  speedMult: 1, // walk/sprint speed multiplier (Speed boost, Ascend tiers)
 }
 
 const HALF = PLAYER_DIMS.height / 2 // capsule centre above the feet
@@ -100,7 +101,8 @@ function step(dt) {
   const scale = len > 1 ? 1 / len : 1
   const wishX = (fwdX * mv.z + rightX * mv.x) * scale
   const wishZ = (fwdZ * mv.z + rightZ * mv.x) * scale
-  const speed = inputState.sprint ? PHYSICS.sprintSpeed : PHYSICS.walkSpeed
+  // speedMult: the Speed boost and Ascend tiers (progression.js sets it every frame).
+  const speed = (inputState.sprint ? PHYSICS.sprintSpeed : PHYSICS.walkSpeed) * (player.speedMult ?? 1)
 
   const rate = !player.grounded ? PHYSICS.airAccel : len > 0.01 ? PHYSICS.accel : PHYSICS.decel
   approach2D(player.velocity, wishX * speed, wishZ * speed, rate * dt)

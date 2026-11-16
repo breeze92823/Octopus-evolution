@@ -11,6 +11,16 @@
       "port": 5231
     },
     {
+      "name": "octopus-backend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "../Octopus-evolution-backend",
+        "start"
+      ],
+      "port": 2567
+    },
+    {
       "name": "dev",
       "runtimeExecutable": "npx",
       "runtimeArgs": [

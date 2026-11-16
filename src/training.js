@@ -3,7 +3,7 @@
 // (x2 with the Train potion). Clicking / tapping HIT / pressing E hits faster.
 // At the level cap the hits still land but pay nothing and say MAX LEVEL.
 import { TRAINING } from './config.js'
-import { addXp, atCap, fmt, state, xpPerHit, zoneUnlocked } from './state.js'
+import { addXp, atCap, bumpStat, fmt, state, xpPerHit, zoneUnlocked } from './state.js'
 import { sfx } from './audio/index.js'
 import { Vector3 } from 'three'
 
@@ -61,6 +61,8 @@ export function createTraining({ hub, octo, fx, player }) {
         }
         const xp = xpPerHit(z.def)
         addXp(xp)
+        bumpStat('hits')
+        bumpStat(`z_${z.def.id}`) // per-zone training hits (the zone legend titles)
         fx.number(top.set(z.dummyPos.x, z.dummyPos.y + 1.2, z.dummyPos.z), `+${fmt(xp)} XP`, 'xp')
         sfx.xp()
       },

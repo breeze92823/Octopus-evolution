@@ -1,28 +1,9 @@
-// Menu windows: Shop (tentacles, boosts, training zones), Inventory (equip owned
-// tentacles) and Rebirth. One window open at a time; Esc / the X / a tap on the
-// backdrop closes it. Every price is in Wins.
+// Menu windows: the Shop (tentacles). The inventory (My Skins / Items / Titles / Trails) lives in
+// collection.js and Rebirth / Ascend in popups.js; they share this module's one-window-at-a-time
+// slot (claimWindow). Esc / the X / a tap on the backdrop closes it. Every price is in Wins.
 import './windows.css'
-import { BOOSTS, PROGRESSION, TENTACLES, ZONES } from './config.js'
-import {
-  atCap,
-  buyLevels,
-  buyStarter,
-  buyTentacle,
-  buyTrain2x,
-  buyWins2x,
-  buyZone,
-  canRebirth,
-  doRebirth,
-  equipTentacle,
-  fmt,
-  levelCap,
-  levelPackPrice,
-  onChange,
-  owns,
-  rebirthBoost,
-  state,
-  zoneUnlocked,
-} from './state.js'
+import { TENTACLES } from './config.js'
+import { buyTentacle, equipTentacle, fmt, onChange, owns, state } from './state.js'
 import { ICONS } from './hud.js'
 import { sfx } from './audio/index.js'
 
@@ -47,7 +28,6 @@ export function tentacleThumb(def) {
   </svg>`
 }
 
-const ZONE_ICON = `<svg class="ic" viewBox="0 0 64 64"><rect x="26" y="34" width="12" height="24" rx="3" fill="#a8784a" stroke="#13163a" stroke-width="3"/><circle cx="32" cy="22" r="14" fill="#fff" stroke="#13163a" stroke-width="3"/><circle cx="32" cy="22" r="9" fill="#ff3b4a"/><circle cx="32" cy="22" r="4" fill="#fff"/></svg>`
 
 function el(tag, cls, html = '') {
   const e = document.createElement(tag)
@@ -62,6 +42,15 @@ export function closeTopWindow() {
   if (!current) return false
   current.close()
   return true
+}
+// Other panels (panels.js: rewards, collection, rebirth, ascend) share the one-open-at-a-time slot:
+// claimWindow closes whatever is open and takes the slot; releaseWindow gives it back.
+export function claimWindow(w) {
+  if (current && current !== w) current.close()
+  current = w
+}
+export function releaseWindow(w) {
+  if (current === w) current = null
 }
 let reservedTop = 0
 export function setWindowReserved(px) {
@@ -155,161 +144,38 @@ const shake = (node) => {
 }
 const T = () => ICONS.trophy
 
-// hooks: { onBuyTentacle(def), onRebirth(), toast(text) }
+// hooks: { onBuyTentacle(def) }
 export function createWindows(hooks) {
   // --- Shop -------------------------------------------------------------------------------------------
-  const shop = createWindow({
-    title: 'Shop',
-    icon: ICONS.shop,
-    tabs: [
-      { id: 'tentacles', label: 'Tentacles' },
-      { id: 'boosts', label: 'Boosts' },
-      { id: 'zones', label: 'Training' },
-    ],
-  })
-  shop.setRender((body, tab) => {
-    if (tab === 'tentacles') {
-      const grid = el('div', 'win-grid')
-      TENTACLES.forEach((def, i) => {
-        const owned = owns(def.id)
-        const eq = state.equipped === def.id
-        const card = el('button', `card ${eq ? 'equipped' : ''} ${def.special ? 'special' : ''}`)
-        card.type = 'button'
-        card.style.animationDelay = `${i * 0.025}s`
-        card.innerHTML = `${def.special ? '<span class="badge ol">SPECIAL</span>' : ''}${tentacleThumb(def)}<span class="name">${def.name}</span><span class="xp">+${fmt(def.xp)} XP / hit</span>
-          <span class="tag ol ${eq ? 'eq' : owned ? 'own' : ''}">${eq ? 'EQUIPPED' : owned ? 'EQUIP' : def.price === 0 ? 'FREE' : `${T()}${fmt(def.price)}`}</span>`
-        card.addEventListener('click', () => {
-          if (eq) return
-          if (owned) {
-            equipTentacle(def.id)
-            sfx.equip()
-          } else if (buyTentacle(def.id)) {
-            sfx.purchase()
-            hooks.onBuyTentacle?.(def)
-          } else return shake(card)
-          shop.refresh()
-        })
-        grid.append(card)
-      })
-      body.append(grid)
-    } else if (tab === 'boosts') {
-      const row = (icon, title, sub, label, disabled, fn) => {
-        const c = el('div', 'wide-card')
-        c.innerHTML = `${icon.replace('<svg', '<svg class="ic"')}<div class="txt"><b>${title}</b><span>${sub}</span></div>`
-        const b = el('button', 'buy-btn ol', label)
-        b.type = 'button'
-        b.disabled = disabled
-        b.addEventListener('click', () => {
-          if (fn()) {
-            sfx.purchase()
-            shop.refresh()
-          } else shake(c)
-        })
-        c.append(b)
-        body.append(c)
-      }
-      const train = state.train2x > 0 ? ` (active: ${Math.ceil(state.train2x / 60)} min left)` : ''
-      row(ICONS.bolt, 'x2 Train', `Double training XP for ${BOOSTS.train2x.minutes} minutes. Stacks.${train}`, `${T()}${fmt(BOOSTS.train2x.price)}`, false, buyTrain2x)
-      row(ICONS.trophy, 'x2 Wins', 'Permanently doubles every Wins reward.', state.wins2x ? 'OWNED' : `${T()}${fmt(BOOSTS.wins2x.price)}`, state.wins2x, buyWins2x)
-      row(ICONS.gift, 'Starter Pack', `Sunken Gold tentacles + ${BOOSTS.starter.trainMinutes} min x2 Train + ${BOOSTS.starter.levels} levels. One time only.`, state.starter ? 'OWNED' : `${T()}${fmt(BOOSTS.starter.price)}`, state.starter, buyStarter)
-      for (const pack of BOOSTS.levels) {
-        row(ICONS.bolt, `+${pack.n} Levels`, atCap() ? 'You are at the level cap. Rebirth to go higher!' : `Instantly gain ${pack.n} levels (up to your cap of ${levelCap()}).`, `${T()}${fmt(levelPackPrice(pack))}`, atCap(), () => buyLevels(pack))
-      }
-    } else {
-      ZONES.forEach((z) => {
-        const c = el('div', 'wide-card')
-        const open = zoneUnlocked(z)
-        const req = z.price ? `Unlock for ${fmt(z.price)} Wins` : z.rebirths ? `Needs ${z.rebirths} Rebirth${z.rebirths > 1 ? 's' : ''}` : 'Open to everyone'
-        c.innerHTML = `${ZONE_ICON}<div class="txt"><b>${z.name} — x${z.mult} XP</b><span>${open ? 'Unlocked! Walk onto its floor in the hub to train.' : req}</span></div>`
-        if (z.price && !open) {
-          const b = el('button', 'buy-btn ol', `${T()}${fmt(z.price)}`)
-          b.type = 'button'
-          b.addEventListener('click', () => {
-            if (buyZone(z)) {
-              sfx.unlock()
-              shop.refresh()
-            } else shake(c)
-          })
-          c.append(b)
-        } else {
-          const tag = el('span', `buy-btn ol ${open ? 'blue' : ''}`, open ? 'OPEN' : `${z.rebirths} ${ICONS.rebirth.replace('<svg', '<svg style="width:1.1em;height:1.1em"')}`)
-          tag.style.cursor = 'default'
-          c.append(tag)
-        }
-        body.append(c)
-      })
-    }
-  })
-
-  // --- Inventory ----------------------------------------------------------------------------------------
-  const inventory = createWindow({ title: 'Inventory', icon: ICONS.backpack, color: 'orange' })
-  inventory.setRender((body) => {
+  const shop = createWindow({ title: 'Shop', icon: ICONS.shop })
+  shop.setRender((body) => {
     const grid = el('div', 'win-grid')
-    const list = TENTACLES.filter((d) => owns(d.id))
-    list.forEach((def, i) => {
+    TENTACLES.forEach((def, i) => {
+      const owned = owns(def.id)
       const eq = state.equipped === def.id
       const card = el('button', `card ${eq ? 'equipped' : ''} ${def.special ? 'special' : ''}`)
       card.type = 'button'
-      card.style.animationDelay = `${i * 0.03}s`
-      card.innerHTML = `${tentacleThumb(def)}<span class="name">${def.name}</span><span class="xp">+${fmt(def.xp)} XP / hit</span><span class="tag ol ${eq ? 'eq' : 'own'}">${eq ? 'EQUIPPED' : 'EQUIP'}</span>`
+      card.style.animationDelay = `${i * 0.025}s`
+      card.innerHTML = `${def.special ? '<span class="badge ol">SPECIAL</span>' : ''}${tentacleThumb(def)}<span class="name">${def.name}</span><span class="xp">+${fmt(def.xp)} XP / hit</span>
+        <span class="tag ol ${eq ? 'eq' : owned ? 'own' : ''}">${eq ? 'EQUIPPED' : owned ? 'EQUIP' : def.price === 0 ? 'FREE' : `${T()}${fmt(def.price)}`}</span>`
       card.addEventListener('click', () => {
         if (eq) return
-        equipTentacle(def.id)
-        sfx.equip()
-        inventory.refresh()
+        if (owned) {
+          equipTentacle(def.id)
+          sfx.equip()
+        } else if (buyTentacle(def.id)) {
+          sfx.purchase()
+          hooks.onBuyTentacle?.(def)
+        } else return shake(card)
+        shop.refresh()
       })
       grid.append(card)
     })
     body.append(grid)
-    const more = TENTACLES.length - list.length
-    if (more > 0) {
-      const hint = el('div', 'wide-card', `<div class="txt"><b>${more} more tentacle${more > 1 ? 's' : ''} to collect</b><span>Buy them from the pedestals in the hub or from the Shop.</span></div>`)
-      const b = el('button', 'buy-btn ol', 'SHOP')
-      b.type = 'button'
-      b.addEventListener('click', () => shop.open('tentacles'))
-      hint.append(b)
-      body.append(hint)
-    }
-  })
-
-  // --- Rebirth -----------------------------------------------------------------------------------------------
-  const rebirth = createWindow({ title: 'Rebirth', icon: ICONS.rebirth, color: 'pink' })
-  rebirth.setRender((body) => {
-    const r = state.rebirths
-    const wrap = el('div', 'rb-wrap')
-    const boostNow = Math.round((rebirthBoost(r) - 1) * 100)
-    const boostNext = Math.round((rebirthBoost(r + 1) - 1) * 100)
-    wrap.innerHTML = `
-      <div class="rb-row">
-        <div class="rb-box"><small>Rebirths</small><b>${r}</b></div><span class="rb-arrow ol">➜</span><div class="rb-box next"><small>Rebirths</small><b>${r + 1}</b></div>
-      </div>
-      <div class="rb-row">
-        <div class="rb-box"><small>XP Boost</small><b>+${boostNow}%</b></div><span class="rb-arrow ol">➜</span><div class="rb-box next"><small>XP Boost</small><b>+${boostNext}%</b></div>
-      </div>
-      <div class="rb-row">
-        <div class="rb-box"><small>Level Cap</small><b>${levelCap(r)}</b></div><span class="rb-arrow ol">➜</span><div class="rb-box next"><small>Level Cap</small><b>${levelCap(r + 1)}</b></div>
-      </div>
-      <div class="rb-note">${canRebirth() ? 'You are at max level! Rebirth resets you to Level 1 (you keep your Wins and tentacles) and makes every future level come faster.' : `Reach Level ${levelCap(r)} to rebirth (you are Level ${state.level}). Rebirths also unlock new training zones.`}</div>`
-    const go = el('button', 'buy-btn ol rb-go', 'REBIRTH')
-    go.type = 'button'
-    go.disabled = !canRebirth()
-    go.addEventListener('click', () => {
-      if (doRebirth()) {
-        rebirth.close()
-        hooks.onRebirth?.()
-      } else shake(wrap)
-    })
-    wrap.append(go)
-    body.append(wrap)
   })
 
   onChange((kind) => {
-    if (kind === 'wins' || kind === 'tentacle' || kind === 'boost' || kind === 'level' || kind === 'rebirth' || kind === 'zone') {
-      shop.refresh()
-      inventory.refresh()
-      rebirth.refresh()
-    }
+    if (kind === 'wins' || kind === 'tentacle') shop.refresh()
   })
-  void PROGRESSION
-  return { shop, inventory, rebirth }
+  return { shop }
 }
