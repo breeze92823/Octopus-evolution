@@ -13,15 +13,18 @@
 // automatically; E (THROW) grabs the bandits around it, lifts them and slams
 // them into the ground for big damage on a cooldown.
 import { Vector3 } from 'three'
-import { COMBAT, HUB, HUB_BOSS, LANE, STAGES, gateZ, padZ, stageStartZ } from './config.js'
+import { COMBAT, HUB_BOSS, LANE, STAGES, gateZ, padZ, stageStartZ } from './config.js'
 import {
   addWins,
+  bumpStat,
   addXp,
   armsFor,
   banditStats,
   bossName,
   clearStage,
   damageFor,
+  playerDamage,
+  winsMult,
   fmt,
   hubBossReward,
   isBossStage,
@@ -38,6 +41,7 @@ import {
 } from './state.js'
 import { buildBandit, buildTelegraphPool } from './enemies.js'
 import { sfx } from './audio/index.js'
+import * as bloxity from './bloxity.js'
 
 const rnd = (a, b) => a + Math.random() * (b - a)
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v)
@@ -84,8 +88,7 @@ export function createCombat({ scene, octo, fx, bars, lane, hud, player, telepor
   const aliveInWave = () => enemies.filter((e) => alive(e) && e.wave === run.wave && !e.hubBoss).length
 
   function bounds(e) {
-    if (e.hubBoss) return [HUB.minX + 3, HUB.maxX - 3, HUB.minZ + 3, HUB.maxZ - 3]
-    const s = e.stage
+    const s = e.stage // the hub boss carries the stage it landed in, so it stays inside the lane
     return [-LANE.halfWidth + 0.8, LANE.halfWidth - 0.8, gateZ(s) + 1.5, stageStartZ(s) + 18]
   }
 
@@ -175,9 +178,13 @@ export function createCombat({ scene, octo, fx, bars, lane, hud, player, telepor
     const L = state.level
     const hp = damageFor(L) * HUB_BOSS.hpSlaps
     const hit = maxHpFor(L) * HUB_BOSS.hitShare
-    const b = spawnEnemy('giant', HUB.bossSpawn.x, HUB.bossSpawn.z, hp, hit, { hubBoss: true, name: HUB_BOSS.name, dropFrom: 26 })
+    // It lands in the lane, ahead of the player (never in the hub).
+    const s = Math.min(STAGES.count, run.cleared + 1)
+    const z = Math.max(gateZ(s) + 4, pz() - HUB_BOSS.spawnAhead)
+    const b = spawnEnemy('giant', 0, z, hp, hit, { hubBoss: true, stage: s, name: HUB_BOSS.name, dropFrom: 26 })
     hub.boss = b
     hud.announce('BOSS FIGHT!', `${HUB_BOSS.name} has landed!`, 'boss')
+    hud.setCombat({ on: true, leave: true })
     later(0.9, () => sfx.bossRoar())
     hud.bossBar(HUB_BOSS.name, hp, hp)
   }
@@ -222,6 +229,8 @@ export function createCombat({ scene, octo, fx, bars, lane, hud, player, telepor
     e.fling.z = (dz / d) * sp
     e.fling.y = e.boss ? 4 : rnd(7, 10)
     e.fling.spin = rnd(-1, 1) * (e.boss ? 2 : 9)
+    // Title counters (state.stats): bandits, stage bosses, giant bandits.
+    bumpStat(e.hubBoss ? 'giants' : e.boss ? 'bosses' : 'kills')
     if (e.boss) {
       sfx.bossDie()
       hud.bossBar(null)
@@ -258,7 +267,7 @@ export function createCombat({ scene, octo, fx, bars, lane, hud, player, telepor
     telegraphs.hideAll()
     const st = lane.stages[s - 1]
     st.setGate({ open: true, left: 0 })
-    st.pads[0].setText(`+${fmt(stageWins(s) * (state.wins2x ? 2 : 1))} Wins`)
+    st.pads[0].setText(`+${fmt(Math.round(stageWins(s) * winsMult()))} Wins`)
     st.pads[1].setText(`+${fmt(stageXp(s))} XP`)
     st.pads[0].setActive(true)
     st.pads[1].setActive(true)
@@ -295,20 +304,12 @@ export function createCombat({ scene, octo, fx, bars, lane, hud, player, telepor
         e.t = 0
       }
     }
-    if (!run.inLane) {
-      // The hub boss: no shop dialog, just a short knockout and back to spawn.
-      hud.announce('KNOCKED OUT!', 'Back to spawn...', 'lose')
-      later(1.6, () => {
-        teleportHome()
-        playerHp = playerMax
-        dead = false
-      })
-      return
-    }
     const s = run.active || run.cleared || 1
     const rp = revivePrice(s)
     const vp = revengePrice(s)
-    reviveClose = hud.revive({
+    const gate = bloxity.showDeathScreen() // Boxity's banners + countdown; null outside Boxity
+    const closeHud = hud.revive({
+      gate,
       seconds: COMBAT.reviveSeconds,
       revivePrice: rp,
       revengePrice: vp,
@@ -331,7 +332,17 @@ export function createCombat({ scene, octo, fx, bars, lane, hud, player, telepor
         playerHp = playerMax
         dead = false
       },
+      // A rewarded ad (Boxity plays it) buys a free revive; granted only when the whole ad was watched.
+      onAd: bloxity.adsAvailable() ? async () => (await bloxity.showRewardedAd('revive')).status === 'completed' : null,
+      onAdRevive: () => {
+        reviveClose = null
+        revive(false)
+      },
     })
+    reviveClose = () => {
+      closeHud()
+      gate?.hide()
+    }
   }
 
   function revive(revenge) {
@@ -364,7 +375,9 @@ export function createCombat({ scene, octo, fx, bars, lane, hud, player, telepor
 
   function endRun() {
     for (const e of enemies) {
-      if (e.hubBoss) continue
+      // Leaving the lane (or ending the run) also takes the hub boss away: it only exists in the
+      // lane, and drops again (full HP) on the next visit while the timer is at zero.
+      if (e === hub.boss) hub.boss = null
       if (e.tele) telegraphs.hide(e.tele)
       e.bar.remove()
       e.model.dispose()
@@ -378,8 +391,8 @@ export function createCombat({ scene, octo, fx, bars, lane, hud, player, telepor
     }
     run.cleared = 0
     run.active = 0
-    if (!hub.boss) hud.bossBar(null)
-    hud.setCombat({ on: !!hub.boss })
+    hud.bossBar(null)
+    hud.setCombat({ on: false })
     if (reviveClose) {
       reviveClose()
       reviveClose = null
@@ -428,7 +441,7 @@ export function createCombat({ scene, octo, fx, bars, lane, hud, player, telepor
     later(delay, () => {
       if (!alive(target) || dead) return
       const crit = Math.random() < 0.12
-      const dmg = damageFor(state.level) * rnd(0.9, 1.1) * (crit ? 2 : 1)
+      const dmg = playerDamage() * rnd(0.9, 1.1) * (crit ? 2 : 1)
       chest(target, tv2)
       fx.slapHit(tv2, crit ? 1.35 : 1, crit ? '#ff8a3d' : '#ffe28a')
       sfx.slap(crit ? 1.3 : 1, panOf(target.x, target.z))
@@ -452,6 +465,7 @@ export function createCombat({ scene, octo, fx, bars, lane, hud, player, telepor
       return true
     }
     throwCd = COMBAT.throwCooldown
+    bumpStat('throws')
     const positions = targets.map((e) => new Vector3(e.x, e.y + e.model.height * 0.5, e.z))
     const res = octo.grabSlam(positions)
     later(Math.max(0, res.liftAt * 0.6), () => sfx.grab())
@@ -480,7 +494,7 @@ export function createCombat({ scene, octo, fx, bars, lane, hud, player, telepor
         e.state = 'stunned'
         e.t = 0
         fx.slam(tv.set(e.x, 0, e.z), e.boss ? 1.3 : 0.9)
-        const dmg = damageFor(state.level) * COMBAT.throwMult * rnd(0.95, 1.12)
+        const dmg = playerDamage() * COMBAT.throwMult * rnd(0.95, 1.12)
         hurtEnemy(e, dmg, 'big', 0)
         landed++
       }
@@ -747,19 +761,9 @@ export function createCombat({ scene, octo, fx, bars, lane, hud, player, telepor
       endRun()
       teleportHome()
     },
-    skipBossTimer() {
-      if (hub.boss || hub.pending) return false
-      state.bossTimer = 0
-      return true
-    },
     reset() {
       endRun()
-      if (hub.boss) {
-        hub.boss.bar.remove()
-        hub.boss.model.dispose()
-        enemies.splice(enemies.indexOf(hub.boss), 1)
-        hub.boss = null
-      }
+      hub.pending = false
       hud.bossBar(null)
       hud.setCombat({ on: false })
     },
@@ -776,7 +780,7 @@ export function createCombat({ scene, octo, fx, bars, lane, hud, player, telepor
       // Stage triggers.
       if (run.inLane && !dead && !run.active) {
         const s = run.cleared + 1
-        if (s <= STAGES.count && z < stageStartZ(s) - LANE.triggerInset) startWave(s)
+        if (s <= STAGES.count && !hub.boss && z < stageStartZ(s) - LANE.triggerInset) startWave(s)
       }
       // Pads.
       if (run.inLane && !dead && run.cleared > 0) {
@@ -794,11 +798,11 @@ export function createCombat({ scene, octo, fx, bars, lane, hud, player, telepor
       if (!hub.boss) {
         if (state.bossTimer > 0) state.bossTimer = Math.max(0, state.bossTimer - dt)
         if (state.bossTimer <= 0) {
-          if (!run.inLane && !dead) spawnHubBoss()
+          // Only in the lane, and only between waves (one boss bar at a time).
+          if (run.inLane && !run.active && !dead) spawnHubBoss()
           else hub.pending = true
         }
       }
-      if (hub.boss && !run.inLane) hud.setCombat({ on: true, leave: false })
 
       // Scheduled hits.
       for (let i = events.length - 1; i >= 0; i--) {

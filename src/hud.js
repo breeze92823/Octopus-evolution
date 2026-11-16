@@ -16,7 +16,6 @@ import {
   nextArmLevel,
   onChange,
   rebirthBoost,
-  skipBossPrice,
   state,
   xpNeed,
 } from './state.js'
@@ -54,7 +53,7 @@ function btn(cls, html, fn) {
   return b
 }
 
-// actions: { rebirth, shop, inventory, buyLevels(pack), train2x, wins2x, starter, skipBoss, leave, throw, prompt, hit, mute }
+// actions: { rebirth, shop, inventory, buyLevels(pack), train2x, wins2x, starter, leave, throw, prompt, hit, mute }
 export function createHud(actions) {
   const root = el('div', 'hud')
   document.body.appendChild(root)
@@ -73,8 +72,7 @@ export function createHud(actions) {
   // Top.
   const top = el('div', 'hud-top')
   const timer = el('div', 'ol', '')
-  const skip = btn('skip', '', actions.skipBoss)
-  top.append(timer, skip)
+  top.append(timer)
   const bossBar = el('div', 'hud-bossbar', '<div class="name ol"></div><div class="track"><div class="ghost"></div><div class="fill"></div><div class="txt ol"></div></div>')
 
   // Right.
@@ -210,53 +208,88 @@ export function createHud(actions) {
 
   // --- Revive dialog -----------------------------------------------------------------------------------
   let reviveTimer = null
-  function doRevive({ seconds, revivePrice, revengePrice, onRevive, onRevenge, onNo }) {
+  // `gate` (bloxity.js showDeathScreen) is Boxity's death screen: its banners and a countdown (4 s or more)
+  // run while the player is dead, and the game respawns ONLY when gate.respawn() returns true, never on a
+  // timer of its own. Without it (outside Boxity) the dialog keeps its own countdown that ends in "No".
+  // `onAd` (async, true when the whole rewarded ad was watched) + `onAdRevive` add a free revive.
+  function doRevive({ seconds, revivePrice, revengePrice, onRevive, onRevenge, onNo, onAd, onAdRevive, gate }) {
     revive.innerHTML = ''
     const h = el('h2', 'ol', 'REVIVE?')
-    const count = el('div', 'count ol', seconds.toFixed(2))
+    const count = el('div', 'count ol', gate ? '' : seconds.toFixed(2))
     const row = el('div', 'row')
+    const buttons = []
     const opt = (cls, label, price, sub, fn) => {
       const o = el('div', 'opt')
       const b = btn(cls, `<span class="ol">${label}</span>${price != null ? `<span class="price ol">${ICONS.trophy}${fmt(price)}</span>` : ''}`, fn)
       o.append(b)
       if (sub) o.append(el('small', 'ol', sub))
       row.append(o)
+      buttons.push(b)
       return b
     }
     let left = seconds
     let lastTick = Math.ceil(left)
+    let ready = !gate
     const close = () => {
       clearInterval(reviveTimer)
       reviveTimer = null
       revive.classList.remove('on')
     }
-    const tryPay = (fn) => () => {
-      if (fn()) close()
+    // Every way out goes through here: wait for the countdown, check the price, then respawn.
+    const go = (price, fn) => () => {
+      if (!ready) return doToast('Wait for the countdown')
+      if (price != null && state.wins < Math.ceil(price)) return doToast('Not enough Wins!')
+      if (gate && !gate.respawn()) return doToast('Wait for the countdown')
+      if (fn() !== false) close()
       else doToast('Not enough Wins!')
     }
-    opt('g', 'Revive!', revivePrice, '+ FULL HP', tryPay(onRevive))
-    opt('y', 'Revenge!', revengePrice, '+ KILL ENEMIES', tryPay(onRevenge))
-    opt('r', 'No', null, '', () => {
-      close()
-      onNo()
-    })
+    opt('g', 'Revive!', revivePrice, '+ FULL HP', go(revivePrice, onRevive))
+    opt('y', 'Revenge!', revengePrice, '+ KILL ENEMIES', go(revengePrice, onRevenge))
+    if (onAd) {
+      let adBusy = false
+      opt('g', 'Watch Ad', null, '+ FREE REVIVE', async () => {
+        if (adBusy) return
+        if (!ready) return doToast('Wait for the countdown')
+        adBusy = true
+        const ok = await onAd()
+        adBusy = false
+        if (!ok) return doToast('No ad right now, try again later')
+        if (gate && !gate.respawn()) return doToast('Wait for the countdown')
+        close()
+        onAdRevive()
+      })
+    }
+    opt('r', 'No', null, '', go(null, () => (onNo(), true)))
     revive.append(h, count, row)
     revive.classList.add('on')
     document.exitPointerLock?.()
     clearInterval(reviveTimer)
-    reviveTimer = setInterval(() => {
-      left = Math.max(0, left - 0.05)
-      count.textContent = left.toFixed(2)
-      const c = Math.ceil(left)
-      if (c !== lastTick) {
-        lastTick = c
-        actions.tick?.()
-      }
-      if (left <= 0) {
-        close()
-        onNo()
-      }
-    }, 50)
+    reviveTimer = null
+    if (gate) {
+      gate.onCountdown((n) => {
+        ready = n <= 0
+        count.textContent = ready ? 'GO' : String(n)
+        for (const b of buttons) b.style.opacity = ready ? '' : '0.55'
+        if (!ready && n !== lastTick) {
+          lastTick = n
+          actions.tick?.()
+        }
+      })
+    } else {
+      reviveTimer = setInterval(() => {
+        left = Math.max(0, left - 0.05)
+        count.textContent = left.toFixed(2)
+        const c = Math.ceil(left)
+        if (c !== lastTick) {
+          lastTick = c
+          actions.tick?.()
+        }
+        if (left <= 0) {
+          close()
+          onNo()
+        }
+      }, 50)
+    }
     return close
   }
 
@@ -329,18 +362,11 @@ export function createHud(actions) {
     trophyIcon: () => ICONS.trophy,
     // Per frame (cheap: only touches the DOM when text changes).
     update() {
-      const tt = state.bossTimer > 0 ? `NEXT <span class="boss-word">BOSS</span> FIGHT IN: ${fmtTime(state.bossTimer)}` : `<span class="boss-word">BOSS</span> FIGHT!`
+      const tt = state.bossTimer > 0 ? `NEXT <span class="boss-word">BOSS</span> FIGHT IN: ${fmtTime(state.bossTimer)}` : bossBar.classList.contains('on') ? `<span class="boss-word">BOSS</span> FIGHT!` : `<span class="boss-word">BOSS</span> WAITS IN THE LANE!`
       if (timer.dataset.t !== tt) {
         timer.dataset.t = tt
         timer.innerHTML = tt
       }
-      const sk = `SKIP ${ICONS.trophy}${fmt(skipBossPrice())}`
-      if (skip.dataset.t !== String(skipBossPrice())) {
-        skip.dataset.t = String(skipBossPrice())
-        skip.innerHTML = `<span class="ol">SKIP</span>${ICONS.trophy}<span class="ol">${fmt(skipBossPrice())}</span>`
-      }
-      skip.style.display = state.bossTimer > 0 ? '' : 'none'
-      void sk
       const on = state.train2x > 0
       potion.classList.toggle('on', on)
       if (on) {

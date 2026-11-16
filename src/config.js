@@ -8,6 +8,48 @@ export const SAVE_KEY = 'octopus-evolution.save.v1'
 // Forces the Bloxity SDK and avatar CDN to be treated as unavailable (see .env.example).
 export const DEV_MODE = import.meta.env.VITE_DEV_MODE === 'true'
 
+// --- Game server (../Octopus-evolution-backend, Colyseus room "world"; net.js) --------------
+// One URL per Bloxity Legion channel: `npm run dev` / `build:dev` use _DEV (npm run dev defaults to the
+// local server), `npm run build` uses _MAIN. Empty = net.js asks the Bloxity SDK for the channel's
+// endpoint at runtime; with no SDK either the game plays offline on its localStorage save.
+const SERVER_URL_DEV = import.meta.env.VITE_SERVER_URL_DEV || (import.meta.env.DEV ? 'ws://localhost:2567' : '')
+const SERVER_URL_MAIN = import.meta.env.VITE_SERVER_URL_MAIN || ''
+export const SERVER_URL = import.meta.env.MODE === 'production' ? SERVER_URL_MAIN : SERVER_URL_DEV
+export const NET = {
+  saveDebounce: 3, // s after the last change before the progress is pushed ...
+  saveMaxWait: 15, // ... but never later than this after the first unsaved change
+  saveEvery: 30, // s between checks for changes that raise no event (playtime, timers)
+  retry: 10, // s between reconnect attempts (doubling up to retryMax: a cold start can take ~45 s)
+  retryMax: 60,
+  guestKey: 'octopus-evolution.dev-id', // localStorage: the `dev-` id local dev (no Bloxity token) joins with; the server honours it outside production only
+  boardsEvery: 60, // s between reads of the hub boards (Bloxity's boards when the game server is unreachable)
+  poseHz: 10, // pose messages per second (only while moving or turning)
+  maxRemote: 14, // other players drawn at once (the nearest ones)
+  remoteRadius: 220, // m: further than this a remote player is not drawn
+}
+
+// --- Bloxity leaderboards and ads (bloxity.js; the server reports the scores: backend boxity.ts) ---
+// Board ids are lowercase and permanent: the first declaration creates a board, after that the Boxity dashboard
+// owns its settings. Keep in step with the backend's BOXITY_BOARDS. Boxity draws the trophy button and panel.
+export const BLOXITY_BOARDS = [
+  { id: 'wins', label: 'Wins Earned', order: 'desc', mode: 'best', format: 'compact' },
+  { id: 'rebirths', label: 'Rebirths', order: 'desc', mode: 'best', format: 'number' },
+  { id: 'stage', label: 'Best Stage', order: 'desc', mode: 'best', format: 'number' },
+  { id: 'playtime', label: 'Minutes Played', order: 'desc', mode: 'best', format: 'number' },
+]
+// The hub boards (hub.js board keys) -> the saved stat the server ranks -> the Bloxity board it is reported to.
+export const BOARD_LINKS = [
+  { board: 'wins', stat: 'totalWins', bloxity: 'wins' },
+  { board: 'rebirths', stat: 'rebirths', bloxity: 'rebirths' },
+  { board: 'playtime', stat: 'playtime', bloxity: 'playtime', bloxityUnit: 60 }, // Bloxity counts minutes
+  { board: 'stage', stat: 'bestStage', bloxity: 'stage' },
+]
+// Screen ads: Boxity draws banners around a screen the game reports (windows = Shop / Inventory / Rebirth).
+// Gameplay banners are off until the Boxity dashboard turns them on.
+export const ADS = { screens: { panel: {}, results: {}, gameplay: {} } }
+// Emotes: a still emote stops when the player moves faster than this (m/s); clips blend in over `blend` s.
+export const EMOTES = { stopSpeed: 1.2, blend: 0.12 }
+
 // --- World (metres: +X east, +Z south, +Y up; north = -Z) ---------------------
 export const GROUND_Y = 0
 // The hub: a raised square island in the sea, walled on the west, north and east
@@ -25,7 +67,6 @@ export const HUB = {
   laneHalf: 9, // half-width of the gap in the north wall (= the lane floor)
   tile: 4, // m per ground texture tile
   fenceHeight: 3, // invisible fence on the open south edge
-  bossSpawn: { x: 0, z: -14 }, // the hub boss fight lands here
   portal: { x: 0, z: 54 },
 }
 export const WATER = { level: -0.6, size: 1400, color: '#1aa3ff', shallow: '#7ff0ff' }
@@ -107,11 +148,11 @@ export const TENTACLES = [
 // enter; price = Wins to unlock instead (the premium zones). dummy = the target's look.
 export const ZONES = [
   { id: 'farm', name: 'Farm', mult: 3, rebirths: 0, dummy: 'scarecrow', floor: '#f2d36b', theme: '#c98b3a' },
-  { id: 'jungle', name: 'Jungle', mult: 6, rebirths: 0, dummy: 'tiki', floor: '#e9c98a', theme: '#3f9d2f' },
-  { id: 'dojo', name: 'Dojo', mult: 9, rebirths: 1, dummy: 'dojo', floor: '#e8dca4', theme: '#e0262b' },
-  { id: 'castle', name: 'Castle', mult: 12, rebirths: 2, dummy: 'knight', floor: '#9aa3b2', theme: '#3a6fe0' },
+  { id: 'jungle', name: 'Jungle', mult: 6, rebirths: 1, dummy: 'tiki', floor: '#e9c98a', theme: '#3f9d2f' },
+  { id: 'dojo', name: 'Dojo', mult: 9, rebirths: 2, dummy: 'dojo', floor: '#e8dca4', theme: '#e0262b' },
+  { id: 'castle', name: 'Castle', mult: 12, rebirths: 3, dummy: 'knight', floor: '#9aa3b2', theme: '#3a6fe0' },
   { id: 'pirate', name: 'Pirate', mult: 15, rebirths: 4, dummy: 'sailor', floor: '#a8784a', theme: '#ffffff' },
-  { id: 'volcano', name: 'Volcano', mult: 18, rebirths: 6, dummy: 'golem', floor: '#3a2a26', theme: '#ff5a00' },
+  { id: 'volcano', name: 'Volcano', mult: 18, rebirths: 5, dummy: 'golem', floor: '#3a2a26', theme: '#ff5a00' },
   { id: 'space', name: 'Space', mult: 30, price: 2500, dummy: 'astronaut', floor: '#241a4a', theme: '#b06cff' },
   { id: 'rainbow', name: 'Rainbow', mult: 50, price: 9000, dummy: 'cloud', floor: '#ffffff', theme: '#ff7ad9' },
   { id: 'cyber', name: 'Cyber', mult: 80, price: 30000, dummy: 'robot', floor: '#0b120e', theme: '#38ff6a' },
@@ -167,29 +208,154 @@ export const COMBAT = {
 }
 
 // --- Hub boss event -------------------------------------------------------------------------
-// A countdown on the HUD; at zero a giant bandit drops into the hub centre. Its HP and hit
-// are tuned to the player's level so it is always a fight; reward scales with best stage.
-export const HUB_BOSS = { every: 12 * 60, hpSlaps: 45, hitShare: 0.05, name: 'Giant Bandit', winsMult: 4, minWins: 10 }
+// A countdown on the HUD; at zero a giant bandit drops into the LANE (only there: it waits until
+// the player is in the lane between waves, and leaves with them). Its HP and hit are tuned to
+// the player's level so it is always a fight; reward scales with best stage.
+export const HUB_BOSS = { every: 30 * 60, hpSlaps: 45, hitShare: 0.05, name: 'Giant Bandit', winsMult: 4, minWins: 10, spawnAhead: 16 }
 
 // --- Training -----------------------------------------------------------------------------
 export const TRAINING = { autoEvery: 0.5, clickMin: 0.14 }
 
 // --- Shop: boosts and level packs (all paid in Wins) -------------------------------------
 export const BOOSTS = {
-  train2x: { minutes: 15, price: 25 }, // potion: x2 training XP for 15 min (stacks time)
-  wins2x: { price: 750 }, // permanent x2 Wins
-  starter: { price: 180, tentacle: 'sunken', trainMinutes: 20, levels: 5 }, // one time
+  // HUD buy prices are 10x the original tuning (25 / 750 / 180 / 4 per level).
+  train2x: { minutes: 15, price: 250 }, // potion: x2 training XP for 15 min (stacks time)
+  wins2x: { price: 7500 }, // permanent x2 Wins
+  starter: { price: 1800, tentacle: 'sunken', trainMinutes: 20, levels: 5 }, // one time
   levels: [
     { n: 3, discount: 1 },
     { n: 10, discount: 0.92 },
     { n: 40, discount: 0.82 },
   ],
-  levelPriceBase: 4, // Wins per level at level 1 ...
+  levelPriceBase: 40, // Wins per level at level 1 ...
   levelPriceGrowth: 1.07, // ... growing per current level
   revive: 0.6, // revive price = this * the stage's wins (min 3)
   revenge: 2.2, // revenge price = this * the stage's wins (min 10)
-  skipBoss: 0.8, // skip price = this * the hub boss reward (min 8)
 }
+
+// --- Rebirth / Ascend (popups.js) -------------------------------------------------------------
+// Skip Rebirth = rebirth at max level but KEEP the levels. Price (Wins) = skipMult x what those
+// levels would cost as level packs right now (min skipMin): fair, slightly high.
+// levelBase = the per-level price this is measured against (the old pack price; the HUD packs went 10x).
+export const REBIRTH = { skipMult: 1.5, skipMin: 250, levelBase: 4 }
+// Ascend: spend ALL your Wins (needs at least cost(tier)) for a permanent damage multiplier, a
+// bigger and faster octopus. Skip Ascend = pay skipMult x the cost and KEEP the rest of your Wins.
+export const ASCEND = {
+  baseCost: 710, // Wins needed for Ascend 1 ...
+  costGrowth: 3.2, // ... x this per tier
+  dmgPerTier: 0.25, // x(1 + this * tier) damage
+  sizePerTier: 0.06, // x(1 + this * tier) octopus size
+  speedPerTier: 0.05, // x(1 + this * tier) walk speed
+  skipMult: 1.6,
+  maxTier: 60,
+}
+
+// --- Items: boosts you hold and use from My Items (collection.js) --------------------------------
+// Using one adds `minutes` to that boost's timer (they stack). train = x2 training XP (the same
+// timer as the shop's x2 Train potion), wins = x2 Wins earned, damage = x2 damage, speed = x speed.
+export const ITEMS = [
+  { id: 'train', name: '2x Train', short: 'x2', minutes: 5, color: 'blue', timer: 'train2x' },
+  { id: 'wins', name: '2x Wins', short: 'x2', minutes: 5, color: 'red', timer: 'wins2xT' },
+  { id: 'damage', name: '2x Damage', short: 'x2', minutes: 5, color: 'indigo', timer: 'dmg2xT' },
+  { id: 'speed', name: 'Speed', short: '', minutes: 5, color: 'green', timer: 'speedT', mult: 1.5 },
+]
+
+// --- Daily Rewards (rewards.js; server-authoritative, backend src/daily.ts) ---------------------
+// One day unlocks per UTC day you come back on consecutive days; miss a day and the streak (and
+// the calendar) starts over at Day 1. Claimed rewards: wins (never boosted), levels, items.
+// gift: [box, ribbon] colours of the drawn present; chest = the jackpot treasure chest.
+export const DAILY = {
+  days: [
+    { color: 'green', gift: ['#5fd23a', '#ffc21a'], rewards: [{ wins: 350 }, { item: 'train', n: 1 }] },
+    { color: 'red', tag: 'HUGE!', gift: ['#ff3b4a', '#ffc21a'], rewards: [{ wins: 1050 }, { levels: 2 }] },
+    { color: 'blue', gift: ['#2a6cff', '#3ad6ff'], rewards: [{ wins: 1750 }, { item: 'wins', n: 1 }] },
+    { color: 'teal', gift: ['#1fd1c0', '#ffa21a'], rewards: [{ levels: 3 }, { item: 'speed', n: 1 }] },
+    { color: 'purple', gift: ['#a23aff', '#ffc21a'], gem: true, rewards: [{ wins: 4200 }, { item: 'damage', n: 1 }] },
+    { color: 'orange', gift: ['#ff3b4a', '#ffc21a'], rewards: [{ levels: 5 }, { item: 'train', n: 1 }, { item: 'wins', n: 1 }] },
+    {
+      color: 'gold',
+      tag: 'JACKPOT!',
+      chest: true,
+      rewards: [{ wins: 17500 }, { levels: 10 }, { item: 'train', n: 2 }, { item: 'wins', n: 2 }, { item: 'damage', n: 2 }, { item: 'speed', n: 2 }],
+    },
+  ],
+  storageKey: 'octopus-evolution.rewards.v1', // offline / guest copy (the server keeps signed-in players')
+}
+
+// --- Playtime Rewards (rewards.js; server-authoritative, backend src/gifts.ts) ------------------
+// Minutes of play (counted across sessions); once all ten are claimed the clock starts over.
+export const PLAYTIME = {
+  gifts: [
+    { min: 1, color: 'green', gift: ['#5fd23a', '#ffc21a'], rewards: [{ wins: 35 }] },
+    { min: 3, color: 'red', gift: ['#ff3b4a', '#ffc21a'], rewards: [{ levels: 1 }] },
+    { min: 6, color: 'blue', gift: ['#2a6cff', '#3ad6ff'], rewards: [{ item: 'speed', n: 1 }] },
+    { min: 8, color: 'teal', gift: ['#1fd1c0', '#ffa21a'], rewards: [{ item: 'wins', n: 1 }] },
+    { min: 10, color: 'purple', gift: ['#a23aff', '#ffc21a'], gem: true, rewards: [{ item: 'train', n: 1 }] },
+    { min: 15, color: 'orange', gift: ['#ff3b4a', '#ffc21a'], rewards: [{ levels: 3 }] },
+    { min: 20, color: 'sky', gift: ['#2a6cff', '#3ad6ff'], rewards: [{ wins: 140 }] },
+    { min: 25, color: 'pink', gift: ['#a23aff', '#ffc21a'], gem: true, rewards: [{ item: 'damage', n: 1 }] },
+    { min: 30, color: 'green', gift: ['#5fd23a', '#ffc21a'], rewards: [{ item: 'train', n: 1 }, { item: 'wins', n: 1 }] },
+    { min: 45, color: 'purple', chest: true, rewards: [{ wins: 210 }, { levels: 5 }, { item: 'damage', n: 1 }, { item: 'speed', n: 1 }] },
+  ],
+}
+
+// --- Titles (collection.js) ------------------------------------------------------------------
+// Earned automatically when the goal is met; the equipped one floats over your octopus and gives
+// its bonus (train = training XP, damage = damage dealt, wins = Wins earned). tier: 0 grey, 1 blue,
+// 2 purple, 3 gold. goal: [stat, n] -- stats are state keys (level, rebirths, totalWins, playtime
+// s, bestStage, ascend), derived ones (arms, skins, trails) or counters in state.stats (kills,
+// bosses, giants, throws, hits, boosts, dailies, gifts, z_<zone id> = training hits in that zone).
+export const TITLES = [
+  { id: 'hatchling', name: 'Hatchling', tier: 0, bonus: 'train', pct: 2, goal: ['level', 2], desc: 'Reach Level 2' },
+  { id: 'first-swing', name: 'First Swing', tier: 0, bonus: 'damage', pct: 2, goal: ['kills', 1], desc: 'Defeat a bandit' },
+  { id: 'wiggler', name: 'Wiggler', tier: 0, bonus: 'train', pct: 2, goal: ['level', 10], desc: 'Reach Level 10' },
+  { id: 'eight-arms', name: 'Eight Arms', tier: 1, bonus: 'train', pct: 5, goal: ['arms', 8], desc: 'Grow 8 arms' },
+  { id: 'snack-hunter', name: 'Snack Hunter', tier: 0, bonus: 'damage', pct: 2, goal: ['kills', 25], desc: 'Defeat 25 bandits' },
+  { id: 'pocket-change', name: 'Pocket Change', tier: 0, bonus: 'wins', pct: 2, goal: ['totalWins', 1000], desc: 'Earn 1,000 Wins' },
+  { id: 'new-look', name: 'New Look', tier: 0, bonus: 'wins', pct: 2, goal: ['skins', 3], desc: 'Own 3 tentacle skins' },
+  { id: 'regular', name: 'Regular', tier: 0, bonus: 'wins', pct: 2, goal: ['playtime', 30 * 60], desc: 'Play for 30 minutes' },
+  { id: 'potion-sipper', name: 'Potion Sipper', tier: 0, bonus: 'train', pct: 2, goal: ['boosts', 3], desc: 'Use 3 boosts' },
+  { id: 'tosser', name: 'Tosser', tier: 0, bonus: 'damage', pct: 2, goal: ['throws', 50], desc: 'Throw bandits 50 times' },
+  { id: 'brawler', name: 'Brawler', tier: 1, bonus: 'damage', pct: 5, goal: ['kills', 250], desc: 'Defeat 250 bandits' },
+  { id: 'boss-breaker', name: 'Boss Breaker', tier: 1, bonus: 'damage', pct: 5, goal: ['bosses', 1], desc: 'Defeat a stage boss' },
+  { id: 'reborn', name: 'Reborn', tier: 1, bonus: 'train', pct: 5, goal: ['rebirths', 1], desc: 'Rebirth once' },
+  { id: 'lane-runner', name: 'Lane Runner', tier: 1, bonus: 'wins', pct: 5, goal: ['bestStage', 5], desc: 'Clear Stage 5' },
+  { id: 'treasure-hunter', name: 'Treasure Hunter', tier: 1, bonus: 'wins', pct: 5, goal: ['totalWins', 25000], desc: 'Earn 25K Wins' },
+  { id: 'gift-grabber', name: 'Gift Grabber', tier: 1, bonus: 'wins', pct: 5, goal: ['gifts', 10], desc: 'Claim 10 playtime gifts' },
+  { id: 'daily-diver', name: 'Daily Diver', tier: 1, bonus: 'wins', pct: 5, goal: ['dailies', 7], desc: 'Claim 7 daily rewards' },
+  { id: 'trail-blazer', name: 'Trail Blazer', tier: 1, bonus: 'train', pct: 5, goal: ['trails', 1], desc: 'Own a trail' },
+  { id: 'potion-pro', name: 'Potion Pro', tier: 1, bonus: 'damage', pct: 5, goal: ['boosts', 25], desc: 'Use 25 boosts' },
+  { id: 'island-hero', name: 'Island Hero', tier: 1, bonus: 'wins', pct: 5, goal: ['giants', 3], desc: 'Defeat 3 Giant Bandits' },
+  { id: 'dune-king', name: 'Dune King', tier: 2, bonus: 'wins', pct: 10, goal: ['bestStage', 10], desc: 'Clear Stage 10' },
+  { id: 'kraken-fists', name: 'Kraken Fists', tier: 2, bonus: 'damage', pct: 10, goal: ['kills', 2000], desc: 'Defeat 2,000 bandits' },
+  { id: 'twelve-arms', name: 'Twelve Arms', tier: 2, bonus: 'train', pct: 10, goal: ['arms', 12], desc: 'Grow 12 arms' },
+  { id: 'rebirth-pro', name: 'Rebirth Pro', tier: 2, bonus: 'train', pct: 10, goal: ['rebirths', 25], desc: 'Rebirth 25 times' },
+  { id: 'giant-slayer', name: 'Giant Slayer', tier: 2, bonus: 'damage', pct: 10, goal: ['giants', 25], desc: 'Defeat 25 Giant Bandits' },
+  { id: 'marathon', name: 'Marathon', tier: 2, bonus: 'wins', pct: 10, goal: ['playtime', 10 * 3600], desc: 'Play for 10 hours' },
+  { id: 'wins-tycoon', name: 'Wins Tycoon', tier: 2, bonus: 'wins', pct: 10, goal: ['totalWins', 1e6], desc: 'Earn 1M Wins' },
+  { id: 'comet', name: 'Comet', tier: 2, bonus: 'train', pct: 10, goal: ['ascend', 3], desc: 'Ascend 3 times' },
+  { id: 'sugar-rush', name: 'Sugar Rush', tier: 3, bonus: 'damage', pct: 25, goal: ['z_rainbow', 5000], desc: 'Train 5,000 hits in Rainbow' },
+  { id: 'jungle-legend', name: 'Jungle Legend', tier: 3, bonus: 'wins', pct: 25, goal: ['z_jungle', 5000], desc: 'Train 5,000 hits in Jungle' },
+  { id: 'moon-legend', name: 'Moon Legend', tier: 3, bonus: 'train', pct: 25, goal: ['z_space', 5000], desc: 'Train 5,000 hits in Space' },
+  { id: 'dino-legend', name: 'Dino Legend', tier: 3, bonus: 'damage', pct: 25, goal: ['z_volcano', 5000], desc: 'Train 5,000 hits in Volcano' },
+  { id: 'unstoppable', name: 'Unstoppable', tier: 3, bonus: 'train', pct: 20, goal: ['bestStage', 15], desc: 'Clear all 15 stages' },
+  { id: 'deep-collector', name: 'Deep Collector', tier: 3, bonus: 'wins', pct: 25, goal: ['skins', 12], desc: 'Own every tentacle skin' },
+  { id: 'trail-legend', name: 'Trail Legend', tier: 3, bonus: 'train', pct: 25, goal: ['trails', 8], desc: 'Own every trail' },
+  { id: 'billionaire', name: 'Billionaire', tier: 3, bonus: 'wins', pct: 20, goal: ['totalWins', 1e9], desc: 'Earn 1B Wins' },
+]
+
+// --- Trails (collection.js, flair.js): a ribbon behind the octopus while it moves. Wins only. ----
+// colors: gradient from the octopus (first) to the tail (last). sparkle: glitter points on it.
+export const TRAILS = [
+  { id: 'white', name: 'White Trail', price: 2500, colors: ['#ffffff', '#dfe8ff', '#b9c6e6'], bg: '#6a7080' },
+  { id: 'sky', name: 'Sky Trail', price: 10000, colors: ['#bff2ff', '#3ab8ff', '#1a5cff'], bg: '#4a7a9a' },
+  { id: 'lime', name: 'Lime Trail', price: 50000, colors: ['#eaffb0', '#7dff3a', '#1fa82a'], bg: '#5a7a3a' },
+  { id: 'purple', name: 'Purple Trail', price: 250000, colors: ['#f2c8ff', '#b04dff', '#6a12d0'], bg: '#5a3a7a' },
+  { id: 'fire', name: 'Fire Trail', price: 1e6, colors: ['#ffe066', '#ff7a1a', '#e01a1a'], bg: '#7a6a2a' },
+  { id: 'golden', name: 'Golden Trail', price: 5e6, colors: ['#fff6b0', '#ffc21a', '#c98200'], bg: '#6a6a4a', sparkle: true },
+  { id: 'rainbow', name: 'Rainbow Trail', price: 25e6, colors: ['#ff3b4a', '#ffa21a', '#ffe11a', '#3ad65a', '#2a8aff', '#a23aff'], bg: '#7a2a2a', sparkle: true },
+  { id: 'galaxy', name: 'Galaxy Trail', price: 100e6, colors: ['#ff6ad8', '#a23aff', '#3a1a9a', '#120838'], bg: '#6a2a7a', sparkle: true },
+]
 
 // --- Player modes (modes.js) -------------------------------------------------
 // 'character' = third-person chase cam with the avatar on screen.
@@ -337,6 +503,7 @@ export const CAMERA = {
 // SDK setting keys this game listens for; registering a listener makes the control
 // appear in the portal's settings menu.
 export const SETTINGS = {
+  master_volume: { def: '80', type: 'number', min: 0, max: 100 }, // 0-100: drives the audio master bus
   graphics_quality: { def: DEFAULT_GRAPHICS, type: 'enum', values: ['Low', 'Medium', 'High', 'Ultra'] },
   camera_sensitivity: { def: '1', type: 'number', min: 0.1, max: 5 },
   show_fps: { def: 'false', type: 'bool' },

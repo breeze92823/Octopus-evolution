@@ -131,18 +131,6 @@
 .hud-top .boss-word {
   color: #ff3b3b;
 }
-.hud-top .skip {
-  display: flex;
-  align-items: center;
-  gap: 0.25em;
-  padding: 0.18em 0.55em;
-  border-radius: 0.35em;
-  border: 0.12em solid #0d5a1a;
-  background: linear-gradient(#7dff6a, #2ed14a 55%, #1aa83a);
-  box-shadow: 0 0.12em 0 #0d5a1a, inset 0 0.08em 0 rgba(255, 255, 255, 0.5);
-  font-size: 0.82em;
-}
-.hud-top .skip svg,
 .price svg {
   width: 1.05em;
   height: 1.05em;

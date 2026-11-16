@@ -2,7 +2,7 @@
 // here may throw when the SDK is missing: a blocked sdk.bloxity.io leaves the
 // game fully playable on the default avatar and keyboard controls.
 // Docs: https://docs.bloxity.io/#html5
-import { GAME_SLUG, GAME_TITLE, SETTINGS, DEV_MODE, coerceSetting } from './config.js'
+import { ADS, BLOXITY_BOARDS, GAME_SLUG, GAME_TITLE, SETTINGS, DEV_MODE, coerceSetting } from './config.js'
 
 export function sdk() {
   if (DEV_MODE) return null
@@ -178,10 +178,21 @@ export function init() {
     }
 
     unsubscribers.push(
-      SDK.player.onEvent((event) => {
+      SDK.player.onEvent((event, data) => {
         if (event === 'respawn_request') emit(respawnListeners)
+        else if (event === 'play_emote') emit(emoteListeners, String(data ?? ''))
+        else if (event === 'stop_emote') emit(emoteListeners, '')
       }),
     )
+
+    // Boards and ad screens are declared once, right after init; the rest are push events.
+    try {
+      SDK.leaderboard?.define?.(BLOXITY_BOARDS)
+      SDK.ads?.declareScreens?.(ADS.screens)
+    } catch (err) {
+      console.warn('[bloxity] declaring boards / ad screens failed', err)
+    }
+    wireFeatures(SDK)
 
     SDK.game.loadingStep('Building the island')
   } catch (err) {
@@ -379,5 +390,258 @@ export function requestFullscreen(on) {
     else SDK.portal.exitFullscreen()
   } catch {
     // Ignore.
+  }
+}
+
+// --- Environment ----------------------------------------------------------
+// Boxity tells the game which environment it runs in (prod / stage / local); never work it out from
+// the hostname. Older SDK builds have no environment(): the prod defaults apply.
+export function environment() {
+  try {
+    return sdk()?.environment?.() ?? null
+  } catch {
+    return null
+  }
+}
+export const apiUrl = () => (environment()?.apiUrl || 'https://api.bloxity.io').replace(/\/$/, '')
+export const staticUrl = () => (environment()?.staticUrl || 'https://static.bloxity.io').replace(/\/$/, '')
+
+// --- Identity for the game server ------------------------------------------------
+// The server verifies this JWT with Boxity (backend auth.ts) and uses only the verified user id.
+export function getToken() {
+  try {
+    return sdk()?.auth?.getToken?.() || null
+  } catch {
+    return null
+  }
+}
+
+// --- Look ---------------------------------------------------------------------------
+// The outfit key names the whole look (every slot, a custom character, the proportions) in one string.
+export function getOutfitKey() {
+  try {
+    const key = sdk()?.avatar?.getOutfitKey?.()
+    return typeof key === 'string' ? key : ''
+  } catch {
+    return ''
+  }
+}
+
+// The same skin texture (worn pants, shirt and face drawn on) for ANOTHER player from their replicated ids.
+export function getSkinTextureUrlFor(equipped) {
+  try {
+    const url = sdk()?.avatar?.getSkinTextureUrlFor?.(equipped)
+    return typeof url === 'string' && url ? url : null
+  } catch {
+    return null
+  }
+}
+
+// The platform character kit (Boxity dresses the player.glb rig in a whole look). Resolves null when the kit
+// is off for this game, the SDK is older, or a custom character is worn: the manual path (avatar/loader.js)
+// then runs. `THREE` and `GLTFLoader` are the game's own; `root` holds the rig's SkinnedMesh and bones.
+export async function dressRig({ THREE, GLTFLoader, root, outfitKey }) {
+  try {
+    const kit = sdk()?.character
+    if (!kit || !outfitKey || !kit.canDress?.(outfitKey)) return null
+    // proportions: 'game' = avatar/loader.js applyProportions already shapes the bones every look change.
+    return (await kit.dress({ THREE, GLTFLoader, root, outfitKey, proportions: 'game' })) ?? null
+  } catch (err) {
+    console.warn('[bloxity] character kit failed; using the manual avatar', err)
+    return null
+  }
+}
+
+// --- Leaderboards (Boxity draws the trophy button and the panel; the game never draws its own button) ---
+// Declares the boards once, right after init. The first declaration creates a board; after that the
+// Boxity dashboard owns its settings. The server reports the scores (backend boxity.ts); the browser
+// only submits when there is no game server connection.
+export function defineBoards(boards) {
+  try {
+    sdk()?.leaderboard?.define?.(boards)
+  } catch (err) {
+    console.warn('[bloxity] leaderboard.define failed', err)
+  }
+}
+export async function submitScore(board, score) {
+  try {
+    return (await sdk()?.leaderboard?.submit?.(board, Math.floor(score))) ?? null
+  } catch {
+    return null
+  }
+}
+// The top rows of a board as [{ rank, name, value }] ('all' = all time), or null without the SDK / on failure.
+export async function topRows(board, limit = 10) {
+  try {
+    const lb = sdk()?.leaderboard
+    if (!lb?.getTop) return null
+    const standing = await lb.getTop(board, { period: 'all', limit })
+    if (!standing || !Array.isArray(standing.rows)) return null
+    return standing.rows.map((r) => ({ rank: r.rank, name: r.displayName || r.username || 'Player', value: Number(r.score) || 0 }))
+  } catch {
+    return null
+  }
+}
+export function openLeaderboard(board) {
+  try {
+    return !!sdk()?.leaderboard?.open?.(board)
+  } catch {
+    return false
+  }
+}
+
+// --- Ads (Boxity runs every ad; the game pauses and mutes in between) ---------------
+const adBreakListeners = new Set()
+// fn(true) when an ad starts over the game, fn(false) when it is over. Midrolls can start at any time.
+export function onAdBreak(fn) {
+  adBreakListeners.add(fn)
+  return () => adBreakListeners.delete(fn)
+}
+export const adsAvailable = () => {
+  try {
+    return !!sdk()?.ads?.isAvailable?.()
+  } catch {
+    return false
+  }
+}
+// Lists the game's screens once (menu, lobby, results, panel, gameplay), so Boxity can manage their banners.
+export function declareAdScreens(screens) {
+  try {
+    sdk()?.ads?.declareScreens?.(screens)
+  } catch {
+    // Non-fatal.
+  }
+}
+// Reports which screen is showing; Boxity draws its banners around it. Never throws.
+export function adScreen(type, opts) {
+  try {
+    return sdk()?.ads?.screen?.(type, opts) ?? null
+  } catch {
+    return null
+  }
+}
+// A rewarded video from a button. Resolves { status, rewardToken? }: grant only on 'completed'.
+export async function showRewardedAd(placement) {
+  try {
+    if (!adsAvailable()) return { status: 'disabled' }
+    return (await sdk().ads.showRewarded(placement)) ?? { status: 'error' }
+  } catch {
+    return { status: 'error' }
+  }
+}
+
+// --- Death screen ---------------------------------------------------------------
+// Boxity shows banners and runs a countdown (at least 4 s) while the player is dead. The game keeps its
+// own death UI; its respawn control only works once respawn() returns true. null without the SDK (the
+// game then respawns as it always did).
+export function showDeathScreen() {
+  try {
+    const ds = sdk()?.deathScreen
+    const death = ds?.show?.()
+    if (!death) return null
+    return {
+      // fn(secondsLeft): 4, 3, 2, 1, then 0 = the player may respawn.
+      onCountdown: (fn) => death.onCountdown(fn),
+      // True (and the screen closes) when the player may respawn now; false while the countdown runs.
+      respawn: () => !!death.respawn(),
+      hide: () => {
+        try {
+          ds.hide()
+        } catch {
+          // Already closed.
+        }
+      },
+    }
+  } catch {
+    return null
+  }
+}
+
+// --- Emotes ---------------------------------------------------------------------------
+// Boxity draws the emote button and wheel once the game has registered; the game plays the clip.
+const emoteListeners = new Set()
+// fn(id) when the player picks an emote, fn('') when they take it off.
+export function onEmote(fn) {
+  emoteListeners.add(fn)
+  return () => emoteListeners.delete(fn)
+}
+let emoteCatalogue = null
+// The catalogue { id -> { id, name, clip: { len, loop, tracks } } }, fetched once. Never hardcode ids: it grows.
+export function loadEmotes() {
+  emoteCatalogue ||= fetch(`${apiUrl()}/v1/avatar/emotes`)
+    .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
+    .then((body) => new Map((body?.emotes ?? []).filter((e) => e?.id && e?.clip?.tracks).map((e) => [String(e.id), e])))
+    .catch((err) => {
+      console.warn('[bloxity] emote catalogue failed', err?.message ?? err)
+      emoteCatalogue = null
+      return new Map()
+    })
+  return emoteCatalogue
+}
+
+// --- Chat bubbles -------------------------------------------------------------------------
+// Boxity owns chat; every message in the room reaches every player (the sender's own too). The game
+// only draws the bubble over the sender's head. fn({ userId, username, text, isLocalPlayer, bubble }).
+const chatListeners = new Set()
+export function onChatMessage(fn) {
+  chatListeners.add(fn)
+  return () => chatListeners.delete(fn)
+}
+export const bubbleSeconds = () => {
+  try {
+    const s = sdk()?.chat?.bubbleSeconds
+    return typeof s === 'number' && s > 0 ? s : 4
+  } catch {
+    return 4
+  }
+}
+
+// --- Rooms and friends -----------------------------------------------------------------------
+// Friend-join toasts: playerInRoom for the players already there, playerJoined for each newcomer.
+export function playerInRoom(username) {
+  try {
+    if (username) sdk()?.game?.playerInRoom?.(username)
+  } catch {
+    // Ignore.
+  }
+}
+export function playerJoined(username) {
+  try {
+    if (username) sdk()?.game?.playerJoined?.(username)
+  } catch {
+    // Ignore.
+  }
+}
+
+// Wires the SDK's push events to the listener sets above. Called from init() once the SDK exists.
+function wireFeatures(SDK) {
+  // Boxity draws the emote button only over games that register, and only if registered right after init.
+  try {
+    SDK.game.registerFeature?.('emotes')
+  } catch {
+    // Non-fatal.
+  }
+  const sub = (off) => typeof off === 'function' && unsubscribers.push(off)
+  try {
+    sub(SDK.ads?.onBreakStart?.(() => emit(adBreakListeners, true)))
+    sub(SDK.ads?.onBreakEnd?.(() => emit(adBreakListeners, false)))
+  } catch {
+    // Non-fatal.
+  }
+  try {
+    sub(
+      SDK.chat?.onMessage?.((m) => {
+        if (!m || typeof m.text !== 'string') return
+        let bubble = ''
+        try {
+          bubble = SDK.chat.bubbleText?.(m) ?? ''
+        } catch {
+          // Fall through to the plain text.
+        }
+        emit(chatListeners, { ...m, bubble: bubble || m.text.slice(0, 60) })
+      }),
+    )
+  } catch {
+    // Non-fatal.
   }
 }

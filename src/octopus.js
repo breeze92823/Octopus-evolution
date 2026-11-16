@@ -688,7 +688,8 @@ function makeEnv() {
 
 // --- The player's octopus ------------------------------------------------------------------------------
 class Octopus {
-  constructor() {
+  // lod: the cheaper mesh (the shop displays' ring / side counts) for the other players' octopi.
+  constructor({ lod = false } = {}) {
     this.group = new Group()
     this.group.name = 'octopus'
     this.body = new Group()
@@ -696,7 +697,7 @@ class Octopus {
     this.seat = new Object3D()
     this.seat.name = 'octopus-seat'
     this.group.add(this.seat)
-    this.core = new OctoCore(this.body, { rings: OCTO.rings, sides: OCTO.sides, eyes: false }) // the player's lower body: no face
+    this.core = new OctoCore(this.body, { rings: lod ? OCTO.displayRings : OCTO.rings, sides: lod ? OCTO.displaySides : OCTO.sides, eyes: false }) // the player's lower body: no face
     this.scale = 1
     this.env = makeEnv()
     this.moveEased = 0
@@ -931,8 +932,8 @@ class Octopus {
   }
 }
 
-export function createOctopus() {
-  return new Octopus()
+export function createOctopus(opts) {
+  return new Octopus(opts)
 }
 
 // --- Shop display: a smaller rider-less octopus that idles and slowly turns ----------------------------
