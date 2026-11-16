@@ -1,0 +1,939 @@
+/* In-game HUD (hud.js). Chunky outlined toy-style UI, all relative units. */
+.hud {
+  --stroke: #13163a;
+  --hud-top: 120px; /* below the platform toolbar + chat (set from bloxity.onReservedAreas) */
+  --safe-l: env(safe-area-inset-left, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --u: clamp(0.62rem, 1.15vmin + 0.32rem, 1rem); /* base unit */
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 8;
+  font-family: 'Fredoka', 'Arial Rounded MT Bold', system-ui, sans-serif;
+  font-weight: 700;
+  color: #fff;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.hud button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  pointer-events: auto;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+.hud .ol {
+  -webkit-text-stroke: 0.16em var(--stroke);
+  paint-order: stroke fill;
+  text-shadow: 0 0.09em 0 var(--stroke);
+}
+.hud svg {
+  display: block;
+}
+.hud .pressable {
+  transition: transform 0.08s ease, filter 0.12s;
+}
+.hud .pressable:hover {
+  filter: brightness(1.08);
+  transform: translateY(-1px) scale(1.03);
+}
+.hud .pressable:active {
+  transform: translateY(2px) scale(0.96);
+}
+
+/* --- Left column: menu buttons + stats ----------------------------------------------- */
+.hud-left {
+  position: absolute;
+  left: calc(var(--safe-l) + 0.9 * var(--u));
+  top: max(var(--hud-top), 24vh);
+  display: flex;
+  flex-direction: column;
+  gap: calc(0.6 * var(--u));
+}
+.hud-menu {
+  display: grid;
+  grid-template-columns: repeat(2, auto);
+  gap: calc(0.35 * var(--u)) calc(0.6 * var(--u));
+  justify-content: start;
+}
+.hud-menu button {
+  width: calc(5.4 * var(--u));
+  background: none;
+  border: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-size: calc(1.05 * var(--u));
+  position: relative;
+}
+.hud-menu button svg {
+  width: calc(4.4 * var(--u));
+  height: calc(4.4 * var(--u));
+  filter: drop-shadow(0 0.2em 0.15em rgba(0, 0, 0, 0.35));
+}
+.hud-menu button span {
+  margin-top: calc(-0.5 * var(--u));
+}
+.hud-menu .dot {
+  position: absolute;
+  top: 0;
+  right: calc(0.2 * var(--u));
+  width: calc(1.1 * var(--u));
+  height: calc(1.1 * var(--u));
+  border-radius: 50%;
+  background: #ff2d4a;
+  border: 0.18em solid #fff;
+  display: none;
+  animation: hud-bob 1s ease-in-out infinite;
+}
+.hud-menu .dot.on {
+  display: block;
+}
+.hud-stat {
+  display: flex;
+  align-items: center;
+  gap: calc(0.5 * var(--u));
+  min-width: calc(11 * var(--u));
+  padding: calc(0.35 * var(--u)) calc(1.2 * var(--u)) calc(0.35 * var(--u)) calc(0.5 * var(--u));
+  border-radius: calc(0.8 * var(--u));
+  background: linear-gradient(90deg, rgba(20, 28, 60, 0.62), rgba(20, 28, 60, 0.18));
+  font-size: calc(2.3 * var(--u));
+  line-height: 1;
+}
+.hud-stat svg {
+  width: calc(3.2 * var(--u));
+  height: calc(3.2 * var(--u));
+  filter: drop-shadow(0 0.1em 0.1em rgba(0, 0, 0, 0.3));
+}
+.hud-stat.bump span {
+  animation: hud-bump 0.35s ease;
+}
+.hud-stat.rebirths span {
+  color: #8fe0ff;
+}
+
+/* --- Top: boss timer / boss bar ------------------------------------------------------- */
+.hud-top {
+  position: absolute;
+  top: calc(var(--safe-t) + 0.6 * var(--u));
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: calc(0.8 * var(--u));
+  font-size: calc(2 * var(--u));
+  white-space: nowrap;
+}
+.hud-top .boss-word {
+  color: #ff3b3b;
+}
+.hud-top .skip {
+  display: flex;
+  align-items: center;
+  gap: 0.25em;
+  padding: 0.18em 0.55em;
+  border-radius: 0.35em;
+  border: 0.12em solid #0d5a1a;
+  background: linear-gradient(#7dff6a, #2ed14a 55%, #1aa83a);
+  box-shadow: 0 0.12em 0 #0d5a1a, inset 0 0.08em 0 rgba(255, 255, 255, 0.5);
+  font-size: 0.82em;
+}
+.hud-top .skip svg,
+.price svg {
+  width: 1.05em;
+  height: 1.05em;
+}
+.hud-bossbar {
+  position: absolute;
+  top: calc(var(--safe-t) + 0.4 * var(--u));
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(56vw, calc(34 * var(--u)));
+  text-align: center;
+  display: none;
+}
+.hud-bossbar.on {
+  display: block;
+  animation: hud-drop 0.4s cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+.hud-bossbar .name {
+  font-size: calc(1.5 * var(--u));
+  color: #ffd0d0;
+}
+.hud-bossbar .track {
+  position: relative;
+  height: calc(2.4 * var(--u));
+  border-radius: calc(0.6 * var(--u));
+  background: #1b2130;
+  border: 0.2em solid #0b1020;
+  overflow: hidden;
+  box-shadow: 0 0.2em 0 rgba(0, 0, 0, 0.3);
+}
+.hud-bossbar .fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: linear-gradient(#ff8a7a, #ff3a3a 55%, #b8141a);
+  transition: width 0.12s linear;
+}
+.hud-bossbar .ghost {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: #ffe9a8;
+  transition: width 0.5s ease 0.15s;
+}
+.hud-bossbar .txt {
+  position: absolute;
+  inset: 0;
+  font-size: calc(1.5 * var(--u));
+  line-height: calc(2.1 * var(--u));
+}
+
+/* --- Right column: boosts ----------------------------------------------------------------- */
+.hud-right {
+  position: absolute;
+  right: calc(var(--safe-r) + 0.8 * var(--u));
+  top: max(var(--hud-top), 30vh);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: calc(0.4 * var(--u));
+}
+.boost {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  background: none;
+  border: 0;
+  padding: 0;
+}
+.boost .banner {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  width: calc(13.5 * var(--u));
+  height: calc(4.4 * var(--u));
+  padding-right: calc(0.8 * var(--u));
+  border-radius: calc(0.7 * var(--u));
+  border: 0.18em solid #fff;
+  background: linear-gradient(100deg, #ffe14a, #7dff6a 25%, #3ad6ff 50%, #8a5cff 75%, #ff4fd8);
+  background-size: 200% 100%;
+  animation: hud-rainbow 4s linear infinite;
+  box-shadow: 0 0.25em 0 rgba(0, 0, 0, 0.25);
+  font-size: calc(2.15 * var(--u));
+}
+.boost .icon {
+  position: absolute;
+  left: calc(-1.6 * var(--u));
+  top: 50%;
+  transform: translateY(-50%) rotate(-8deg);
+  width: calc(5.2 * var(--u));
+  height: calc(5.2 * var(--u));
+  filter: drop-shadow(0 0.15em 0.12em rgba(0, 0, 0, 0.35));
+}
+.boost .price {
+  display: flex;
+  align-items: center;
+  gap: 0.25em;
+  margin-top: calc(0.1 * var(--u));
+  margin-right: calc(1.5 * var(--u));
+  font-size: calc(1.45 * var(--u));
+}
+.boost.owned .banner {
+  filter: saturate(0.7) brightness(0.95);
+}
+.starter {
+  background: none;
+  border: 0;
+  padding: 0;
+  margin-top: calc(0.6 * var(--u));
+  margin-right: calc(1 * var(--u));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-size: calc(1.35 * var(--u));
+}
+.starter > svg {
+  width: calc(6 * var(--u));
+  height: calc(6 * var(--u));
+  animation: hud-wiggle 2.4s ease-in-out infinite;
+  filter: drop-shadow(0 0.2em 0.15em rgba(0, 0, 0, 0.35));
+}
+.starter .price svg {
+  width: 1.1em;
+  height: 1.1em;
+}
+.starter .price {
+  color: #7dff6a;
+  display: flex;
+  align-items: center;
+  gap: 0.25em;
+}
+.starter.done {
+  display: none;
+}
+
+/* --- Bottom centre: arms, level bar, level packs -------------------------------------------- */
+.hud-bottom {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--safe-b) + 0.6 * var(--u));
+  transform: translateX(-50%);
+  width: min(94vw, calc(46 * var(--u)));
+  display: flex;
+  flex-direction: column;
+  gap: calc(0.35 * var(--u));
+}
+.hud-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  padding: 0 calc(0.9 * var(--u));
+  font-size: calc(1.6 * var(--u));
+  color: #ffd23a;
+  --stroke: #5a2a00;
+}
+.hud-info small {
+  font-size: 0.62em;
+  color: #fff;
+}
+.hud-level {
+  position: relative;
+  height: calc(3.6 * var(--u));
+  border-radius: calc(0.8 * var(--u));
+  background: rgba(20, 24, 44, 0.78);
+  border: 0.2em solid #0c0f22;
+  overflow: hidden;
+  box-shadow: 0 0.25em 0 rgba(0, 0, 0, 0.3);
+}
+.hud-level .fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  background: linear-gradient(#6ab8ff, #2a7bff 55%, #1a52d6);
+  box-shadow: inset 0 0.25em 0 rgba(255, 255, 255, 0.3);
+  transition: width 0.18s ease-out;
+}
+.hud-level.max .fill {
+  background: linear-gradient(#6ab8ff, #2a7bff 55%, #1a52d6);
+  width: 100% !important;
+}
+.hud-level .lv,
+.hud-level .xp {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: calc(2 * var(--u));
+}
+.hud-level .lv {
+  left: calc(1 * var(--u));
+}
+.hud-level .xp {
+  right: calc(1 * var(--u));
+}
+.hud-level.pulse {
+  animation: hud-pulse 0.5s ease;
+}
+.hud-buy {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: calc(0.4 * var(--u));
+}
+.hud-buy button {
+  position: relative;
+  height: calc(3.6 * var(--u));
+  border-radius: calc(0.6 * var(--u));
+  border: 0.16em solid rgba(0, 0, 0, 0.35);
+  box-shadow: 0 0.2em 0 rgba(0, 0, 0, 0.3), inset 0 0.15em 0 rgba(255, 255, 255, 0.45);
+  font-size: calc(1.7 * var(--u));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-bottom: calc(0.5 * var(--u));
+}
+.hud-buy button:nth-child(1) {
+  background: linear-gradient(#ffe46a, #ffc21a);
+}
+.hud-buy button:nth-child(2) {
+  background: linear-gradient(#ff7a6a, #e8303a);
+}
+.hud-buy button:nth-child(3) {
+  background: linear-gradient(100deg, #ffe14a, #ff6a3d 30%, #ff4fd8 60%, #6a7bff);
+}
+.hud-buy .bolt {
+  position: absolute;
+  width: calc(2.2 * var(--u));
+  height: calc(2.2 * var(--u));
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -62%) rotate(12deg);
+  opacity: 0.85;
+  z-index: 0;
+}
+.hud-buy .lbl {
+  position: relative;
+  z-index: 1;
+}
+.hud-buy .price {
+  position: absolute;
+  left: 50%;
+  bottom: calc(-0.9 * var(--u));
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 0.2em;
+  font-size: calc(1.25 * var(--u));
+  color: #fff;
+  white-space: nowrap;
+  z-index: 1;
+}
+.hud-buy button:disabled {
+  filter: grayscale(0.85) brightness(0.8);
+  cursor: default;
+}
+
+/* --- Prompt (E to buy / equip / unlock) --------------------------------------------------------- */
+.hud-prompt {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--safe-b) + 14.5 * var(--u));
+  transform: translateX(-50%);
+  display: none;
+  align-items: center;
+  gap: calc(0.7 * var(--u));
+  padding: calc(0.5 * var(--u)) calc(1.2 * var(--u)) calc(0.5 * var(--u)) calc(0.6 * var(--u));
+  border-radius: calc(1 * var(--u));
+  border: 0.18em solid #fff;
+  background: linear-gradient(#3a4a8a, #23295a);
+  box-shadow: 0 0.3em 0 rgba(0, 0, 0, 0.3);
+  font-size: calc(1.55 * var(--u));
+  pointer-events: auto;
+  cursor: pointer;
+  white-space: nowrap;
+  max-width: 92vw;
+}
+.hud-prompt.on {
+  display: flex;
+  animation: hud-pop 0.25s cubic-bezier(0.2, 1.6, 0.4, 1);
+}
+.hud-prompt.buy {
+  background: linear-gradient(#ff6a5a, #d6283a);
+}
+.hud-prompt.ok {
+  background: linear-gradient(#5ae06a, #1fae3a);
+}
+.hud-prompt.locked {
+  background: linear-gradient(#7a7f96, #4a4f66);
+}
+.hud-prompt .key {
+  display: grid;
+  place-items: center;
+  width: calc(2.6 * var(--u));
+  height: calc(2.6 * var(--u));
+  border-radius: calc(0.5 * var(--u));
+  background: #fff;
+  color: #13163a;
+  font-size: calc(1.5 * var(--u));
+  box-shadow: 0 0.18em 0 #9aa3c4;
+}
+.hud-prompt .t {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.05;
+}
+.hud-prompt .t small {
+  font-size: 0.72em;
+  color: #ffe9a8;
+  display: flex;
+  align-items: center;
+  gap: 0.25em;
+}
+.hud-prompt .t small svg {
+  width: 1.1em;
+  height: 1.1em;
+}
+
+/* --- Combat buttons --------------------------------------------------------------------------------- */
+.hud-combat {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--safe-b) + 1.2 * var(--u));
+  transform: translateX(-50%);
+  display: none;
+  align-items: center;
+  gap: calc(1.4 * var(--u));
+}
+.hud-combat.on {
+  display: flex;
+}
+/* In the hub (boss fight) the bottom panel stays: sit above it. */
+.hud:not(.lane) .hud-combat {
+  bottom: calc(var(--safe-b) + 15.5 * var(--u));
+}
+
+.hud-combat .leave {
+  height: calc(4.4 * var(--u));
+  padding: 0 calc(2.2 * var(--u));
+  border-radius: calc(0.7 * var(--u));
+  border: 0.2em solid #6a0a10;
+  background: linear-gradient(#ff6a6a, #e0262b 60%, #b8141a);
+  box-shadow: 0 0.25em 0 #6a0a10, inset 0 0.15em 0 rgba(255, 255, 255, 0.4);
+  font-size: calc(2.2 * var(--u));
+  display: none;
+}
+.hud-combat.leave-on .leave {
+  display: block;
+}
+.hud-combat .throw {
+  position: relative;
+  width: calc(8.6 * var(--u));
+  height: calc(8.6 * var(--u));
+  border-radius: 50%;
+  border: 0.22em solid #0d4a1a;
+  background: radial-gradient(circle at 50% 35%, #8aff7a, #2ed14a 55%, #1a9a36);
+  box-shadow: 0 0.3em 0 #0d4a1a, inset 0 0.25em 0 rgba(255, 255, 255, 0.4);
+  font-size: calc(2.1 * var(--u));
+}
+.hud-combat .throw.cd {
+  background: radial-gradient(circle at 50% 35%, #a8adbc, #7a7f90 60%, #5a5f70);
+  border-color: #33384a;
+  box-shadow: 0 0.3em 0 #33384a;
+  font-size: calc(3.4 * var(--u));
+}
+.hud-combat .throw .key {
+  position: absolute;
+  left: calc(-0.4 * var(--u));
+  top: calc(-0.5 * var(--u));
+  display: grid;
+  place-items: center;
+  width: calc(2.6 * var(--u));
+  height: calc(2.6 * var(--u));
+  border-radius: calc(0.5 * var(--u));
+  background: #13163a;
+  border: 0.14em solid #fff;
+  font-size: calc(1.5 * var(--u));
+}
+.hud-hit {
+  display: none;
+}
+
+/* --- Bottom corners -------------------------------------------------------------------------------- */
+.hud-potion {
+  position: absolute;
+  right: calc(var(--safe-r) + 0.9 * var(--u));
+  bottom: calc(var(--safe-b) + 0.8 * var(--u));
+  display: none;
+  align-items: center;
+  gap: 0.35em;
+  font-size: calc(1.55 * var(--u));
+}
+.hud-potion.on {
+  display: flex;
+}
+.hud-potion svg {
+  width: 1.7em;
+  height: 1.7em;
+}
+.hud-mute {
+  position: absolute;
+  left: calc(var(--safe-l) + 0.8 * var(--u));
+  bottom: calc(var(--safe-b) + 0.8 * var(--u));
+  width: calc(3.4 * var(--u));
+  height: calc(3.4 * var(--u));
+  border-radius: 50%;
+  border: 0.16em solid rgba(255, 255, 255, 0.7);
+  background: rgba(20, 28, 60, 0.55);
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+.hud-mute svg {
+  width: 60%;
+  height: 60%;
+}
+
+/* --- Announcements + toasts --------------------------------------------------------------------- */
+.hud-announce {
+  position: absolute;
+  left: 50%;
+  top: 30%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  white-space: nowrap;
+  display: none;
+}
+.hud-announce.on {
+  display: block;
+  animation: hud-announce 2.1s ease forwards;
+}
+.hud-announce .a1 {
+  font-size: clamp(2.4rem, 9vmin, 6rem);
+  line-height: 1;
+  --stroke: #13163a;
+  -webkit-text-stroke-width: 0.12em;
+}
+.hud-announce .a2 {
+  font-size: clamp(1.1rem, 3.6vmin, 2.2rem);
+  margin-top: 0.2em;
+}
+.hud-announce.an-win .a1 {
+  color: #7dff6a;
+  --stroke: #0d3a10;
+}
+.hud-announce.an-lvl .a1 {
+  color: #ffd23a;
+  --stroke: #5a2a00;
+}
+.hud-announce.an-boss .a1 {
+  color: #ff4a4a;
+  --stroke: #3a0000;
+}
+.hud-announce.an-lose .a1 {
+  color: #ff8a8a;
+  --stroke: #3a0000;
+}
+.hud-announce .a2 .gold {
+  color: #ffd23a;
+}
+.hud-toasts {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4em;
+}
+.hud-toast {
+  padding: 0.35em 0.9em;
+  border-radius: 0.6em;
+  background: rgba(15, 20, 45, 0.78);
+  border: 0.12em solid rgba(255, 255, 255, 0.5);
+  font-size: calc(1.4 * var(--u));
+  animation: hud-toast 2.2s ease forwards;
+  white-space: nowrap;
+}
+.hud-hurt {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center, transparent 55%, rgba(255, 0, 30, 0.45));
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+.hud-hurt.on {
+  opacity: 1;
+  transition: opacity 0.04s;
+}
+
+/* --- Revive dialog -------------------------------------------------------------------------------------- */
+.hud-revive {
+  position: absolute;
+  inset: 0;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: calc(1 * var(--u));
+  background: rgba(10, 14, 30, 0.35);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  pointer-events: auto;
+  z-index: 3;
+}
+.hud-revive.on {
+  display: flex;
+}
+.hud-revive h2 {
+  margin: 0;
+  font-size: clamp(2.6rem, 10vmin, 6rem);
+  color: #ff8a1a;
+  --stroke: #4a1600;
+  animation: hud-pop 0.4s cubic-bezier(0.2, 1.6, 0.4, 1);
+}
+.hud-revive .count {
+  font-size: clamp(2.2rem, 8vmin, 4.6rem);
+  color: #ff4a3a;
+  --stroke: #3a0000;
+}
+.hud-revive .row {
+  display: flex;
+  gap: calc(1 * var(--u));
+  flex-wrap: wrap;
+  justify-content: center;
+  padding: 0 calc(1 * var(--u));
+}
+.hud-revive .opt {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3em;
+}
+.hud-revive .opt button {
+  position: relative;
+  width: clamp(8rem, 26vw, 19rem);
+  height: clamp(3.6rem, 11vmin, 7rem);
+  border-radius: 0.3em;
+  border: 0.14em solid #13163a;
+  font-size: clamp(1.4rem, 4.6vmin, 2.8rem);
+  box-shadow: 0 0.12em 0 #13163a, inset 0 0.1em 0 rgba(255, 255, 255, 0.4);
+}
+.hud-revive .g {
+  background: linear-gradient(#8aff6a, #3ac94a);
+}
+.hud-revive .y {
+  background: linear-gradient(#ffe46a, #ffb21a);
+}
+.hud-revive .r {
+  background: linear-gradient(#ff6a5a, #d6283a);
+}
+.hud-revive .opt .price {
+  position: absolute;
+  right: 0.3em;
+  top: -0.75em;
+  display: flex;
+  align-items: center;
+  gap: 0.15em;
+  font-size: 0.6em;
+}
+.hud-revive .opt small {
+  font-size: clamp(0.9rem, 2.6vmin, 1.5rem);
+}
+
+/* --- Lane mode: hub panels step aside --------------------------------------------------------------- */
+.hud.lane .hud-left,
+.hud.lane .hud-right,
+.hud.lane .hud-bottom,
+.hud.lane .hud-top {
+  display: none;
+}
+.hud.windowed .hud-prompt,
+.hud.windowed .hud-combat {
+  display: none;
+}
+
+/* --- Touch layout ---------------------------------------------------------------------------------- */
+.touch-ui .hud-buy {
+  display: none;
+}
+.touch-ui .hud-combat,
+.touch-ui .hud:not(.lane) .hud-combat {
+  left: auto;
+  transform: none;
+  right: calc(var(--safe-r) + clamp(166px, 42vmin, 220px));
+  bottom: calc(var(--safe-b) + 1.2 * var(--u));
+}
+.touch-ui .hud-combat .throw .key,
+.touch-ui .hud-prompt .key {
+  display: none;
+}
+.touch-ui .hud-hit.on {
+  display: grid;
+  place-items: center;
+  position: absolute;
+  right: calc(var(--safe-r) + clamp(166px, 42vmin, 220px));
+  bottom: calc(var(--safe-b) + 6 * var(--u));
+  width: calc(7.4 * var(--u));
+  height: calc(7.4 * var(--u));
+  border-radius: 50%;
+  border: 0.2em solid #6a3a00;
+  background: radial-gradient(circle at 50% 35%, #ffe46a, #ffb21a 60%, #e08a00);
+  box-shadow: 0 0.25em 0 #6a3a00;
+  font-size: calc(1.9 * var(--u));
+}
+/* Portrait phones: everything stacks under the platform's reserved toolbar + chat:
+   boss timer, then the level panel, then the menu (left) and boosts (right). */
+@media (orientation: portrait) {
+  .touch-ui .hud-top {
+    top: var(--hud-top);
+    font-size: calc(1.45 * var(--u));
+  }
+  .touch-ui .hud-bossbar {
+    top: var(--hud-top);
+  }
+  .touch-ui .hud-bottom {
+    bottom: auto;
+    top: calc(var(--hud-top) + 3.4 * var(--u));
+    width: min(94vw, calc(34 * var(--u)));
+  }
+  .touch-ui .hud-left,
+  .touch-ui .hud-right {
+    top: calc(var(--hud-top) + 12 * var(--u));
+  }
+  .touch-ui .hud-info {
+    font-size: calc(1.25 * var(--u));
+  }
+  .touch-ui .hud-level {
+    height: calc(3 * var(--u));
+  }
+  .touch-ui .hud-level .lv,
+  .touch-ui .hud-level .xp {
+    font-size: calc(1.6 * var(--u));
+  }
+  .touch-ui .hud-prompt {
+    bottom: calc(var(--safe-b) + clamp(150px, 38vmin, 210px));
+  }
+  .touch-ui .starter > svg {
+    width: calc(4.6 * var(--u));
+    height: calc(4.6 * var(--u));
+  }
+  .touch-ui .hud-announce {
+    top: 46%;
+  }
+}
+@media (max-width: 560px) {
+  .boost .banner {
+    width: calc(9.5 * var(--u));
+    font-size: calc(1.6 * var(--u));
+    height: calc(3.6 * var(--u));
+  }
+  .boost .icon {
+    width: calc(4.2 * var(--u));
+    height: calc(4.2 * var(--u));
+  }
+  .hud-stat {
+    min-width: calc(8 * var(--u));
+    font-size: calc(1.9 * var(--u));
+  }
+  .hud-top {
+    font-size: calc(1.5 * var(--u));
+  }
+}
+
+/* Short landscape screens (phones on their side): compact columns. The left column sits
+   under the platform's chat area as one icon row + one stat row; the right column moves up
+   beside the boss timer (only the top-left corner is reserved). */
+@media (max-height: 500px) and (orientation: landscape) {
+  .hud-left {
+    top: var(--hud-top);
+    gap: calc(0.35 * var(--u));
+  }
+  .hud-menu {
+    grid-template-columns: repeat(3, auto);
+    gap: 0 calc(0.4 * var(--u));
+  }
+  .hud-menu button {
+    width: calc(4.4 * var(--u));
+    font-size: calc(0.9 * var(--u));
+  }
+  .hud-menu button svg {
+    width: calc(3.2 * var(--u));
+    height: calc(3.2 * var(--u));
+  }
+  .hud-menu button span {
+    margin-top: calc(-0.3 * var(--u));
+  }
+  .hud-left {
+    flex-wrap: wrap;
+    flex-direction: row;
+    width: calc(15 * var(--u));
+  }
+  .hud-menu {
+    width: 100%;
+  }
+  .hud-stat {
+    min-width: 0;
+    font-size: calc(1.5 * var(--u));
+    padding: calc(0.25 * var(--u)) calc(0.7 * var(--u)) calc(0.25 * var(--u)) calc(0.3 * var(--u));
+    gap: calc(0.3 * var(--u));
+  }
+  .hud-stat svg {
+    width: calc(2.1 * var(--u));
+    height: calc(2.1 * var(--u));
+  }
+  .hud-right {
+    top: calc(var(--safe-t) + 3.8 * var(--u));
+    gap: calc(0.2 * var(--u));
+  }
+  .boost .banner {
+    width: calc(9.5 * var(--u));
+    height: calc(3 * var(--u));
+    font-size: calc(1.45 * var(--u));
+  }
+  .boost .icon {
+    width: calc(3.6 * var(--u));
+    height: calc(3.6 * var(--u));
+    left: calc(-1.2 * var(--u));
+  }
+  .boost .price {
+    font-size: calc(1.1 * var(--u));
+  }
+  .starter {
+    margin-top: calc(0.2 * var(--u));
+    font-size: calc(1.05 * var(--u));
+  }
+  .starter > svg {
+    width: calc(3.8 * var(--u));
+    height: calc(3.8 * var(--u));
+  }
+  .hud-announce .a1 {
+    font-size: clamp(2rem, 11vmin, 4rem);
+  }
+  .hud-prompt {
+    bottom: calc(var(--safe-b) + 11.5 * var(--u));
+  }
+  .touch-ui .hud-prompt {
+    bottom: calc(var(--safe-b) + 9 * var(--u));
+  }
+  .hud:not(.lane) .hud-combat {
+    bottom: calc(var(--safe-b) + 11.5 * var(--u));
+  }
+}
+
+/* --- Animations -------------------------------------------------------------------------------------- */
+@keyframes hud-bump {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.25); }
+  100% { transform: scale(1); }
+}
+@keyframes hud-pop {
+  0% { transform: translateX(-50%) scale(0.5); opacity: 0; }
+  100% { transform: translateX(-50%) scale(1); opacity: 1; }
+}
+.hud-revive h2 {
+  animation-name: hud-pop-plain;
+}
+@keyframes hud-pop-plain {
+  0% { transform: scale(0.5); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes hud-drop {
+  0% { transform: translate(-50%, -150%); }
+  100% { transform: translate(-50%, 0); }
+}
+@keyframes hud-announce {
+  0% { transform: translate(-50%, -50%) scale(0.3); opacity: 0; }
+  12% { transform: translate(-50%, -50%) scale(1.12); opacity: 1; }
+  20% { transform: translate(-50%, -50%) scale(1); }
+  80% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+  100% { transform: translate(-50%, -62%) scale(0.96); opacity: 0; }
+}
+@keyframes hud-toast {
+  0% { transform: translateY(12px); opacity: 0; }
+  10% { transform: translateY(0); opacity: 1; }
+  80% { opacity: 1; }
+  100% { transform: translateY(-14px); opacity: 0; }
+}
+@keyframes hud-rainbow {
+  0% { background-position: 0% 0; }
+  100% { background-position: 200% 0; }
+}
+@keyframes hud-wiggle {
+  0%, 70%, 100% { transform: rotate(0); }
+  75% { transform: rotate(-9deg) scale(1.06); }
+  82% { transform: rotate(8deg) scale(1.06); }
+  89% { transform: rotate(-5deg); }
+}
+@keyframes hud-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+@keyframes hud-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(255, 220, 80, 0.9); }
+  100% { box-shadow: 0 0 0 1.2em rgba(255, 220, 80, 0); }
+}

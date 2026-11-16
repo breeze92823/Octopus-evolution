@@ -1,0 +1,27 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "octopus",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": [
+        "/c",
+        "set VITE_DEV_MODE=true&& npx vite --port 5231 --strictPort --mode development"
+      ],
+      "port": 5231
+    },
+    {
+      "name": "dev",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "--port",
+        "5173",
+        "--strictPort",
+        "--mode",
+        "development"
+      ],
+      "port": 5173
+    }
+  ]
+}
